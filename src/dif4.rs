@@ -369,6 +369,7 @@ include!(concat!(env!("OUT_DIR"), "/dif4.rs"));
 
 macro_rules! impl_main_fn {
     ($(#[$attr: meta])? $name: ident, $array_expr: expr) => {
+        $(#[$attr])*
         pub fn $name(data: &mut [c64], twiddles: &[c64], stack: DynStack) {
             let n = data.len();
             let i = n.trailing_zeros() as usize;
@@ -436,6 +437,28 @@ impl_main_fn!(
     #[cfg(target_feature = "sse2")]
     inv_sse2,
     inv_fn_array_sse2()
+);
+
+impl_main_fn!(
+    #[cfg(target_feature = "neon")]
+    fwd_sse2,
+    fwd_fn_array_neon()
+);
+impl_main_fn!(
+    #[cfg(target_feature = "neon")]
+    inv_sse2,
+    inv_fn_array_neon()
+);
+
+impl_main_fn!(
+    #[cfg(target_feature = "simd128")]
+    fwd_sse2,
+    fwd_fn_array_simd128()
+);
+impl_main_fn!(
+    #[cfg(target_feature = "simd128")]
+    inv_sse2,
+    inv_fn_array_simd128()
 );
 
 impl_main_fn!(fwd_scalar, fwd_fn_array_scalar());

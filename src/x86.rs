@@ -1,7 +1,5 @@
 use crate::c64;
-use crate::fft_simd::{
-    fft_simd2_emu, wrap_impl, FftSimd1, FftSimd2, FftSimd4, FftSimd8, FRAC_1_SQRT_2, H1X, H1Y,
-};
+use crate::fft_simd::{fft_simd2_emu, wrap_impl, FftSimd1, FftSimd2, FRAC_1_SQRT_2, H1X, H1Y};
 use core::fmt::Debug;
 
 #[cfg(target_arch = "x86_64")]
@@ -19,90 +17,6 @@ pub struct Sse3;
 pub struct Avx;
 #[derive(Debug, Copy, Clone)]
 pub struct Fma;
-
-#[repr(C)]
-pub struct XmmEmu(f64, f64);
-#[repr(C)]
-pub struct YmmEmu<S: FftSimd1>(S::Xmm, S::Xmm);
-#[repr(C)]
-pub struct ZmmEmu<S: FftSimd2>(S::Ymm, S::Ymm);
-#[repr(C)]
-pub struct AmmEmu<S: FftSimd4>(S::Zmm, S::Zmm);
-#[repr(C)]
-pub struct BmmEmu<S: FftSimd8>(S::Amm, S::Amm);
-
-impl Copy for XmmEmu {}
-impl<S: FftSimd1> Copy for YmmEmu<S> {}
-impl<S: FftSimd2> Copy for ZmmEmu<S> {}
-impl<S: FftSimd4> Copy for AmmEmu<S> {}
-impl<S: FftSimd8> Copy for BmmEmu<S> {}
-
-impl Clone for XmmEmu {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<S: FftSimd1> Clone for YmmEmu<S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<S: FftSimd2> Clone for ZmmEmu<S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<S: FftSimd4> Clone for AmmEmu<S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<S: FftSimd8> Clone for BmmEmu<S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl Debug for XmmEmu {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("XmmEmu")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
-impl<S: FftSimd1> Debug for YmmEmu<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("YmmEmu")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
-impl<S: FftSimd2> Debug for ZmmEmu<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ZmmEmu")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
-impl<S: FftSimd4> Debug for AmmEmu<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AmmEmu")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
-impl<S: FftSimd8> Debug for BmmEmu<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("BmmEmu")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
 
 impl FftSimd1 for Sse2 {
     type Xmm = __m128d;

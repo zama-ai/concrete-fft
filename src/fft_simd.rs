@@ -11,15 +11,15 @@ pub use core::f64::consts::FRAC_1_SQRT_2;
 pub struct Scalar;
 
 #[repr(C)]
-pub struct XmmEmu(f64, f64);
+pub struct XmmEmu(pub f64, pub f64);
 #[repr(C)]
-pub struct YmmEmu<S: FftSimd1>(S::Xmm, S::Xmm);
+pub struct YmmEmu<S: FftSimd1>(pub S::Xmm, pub S::Xmm);
 #[repr(C)]
-pub struct ZmmEmu<S: FftSimd2>(S::Ymm, S::Ymm);
+pub struct ZmmEmu<S: FftSimd2>(pub S::Ymm, pub S::Ymm);
 #[repr(C)]
-pub struct AmmEmu<S: FftSimd4>(S::Zmm, S::Zmm);
+pub struct AmmEmu<S: FftSimd4>(pub S::Zmm, pub S::Zmm);
 #[repr(C)]
-pub struct BmmEmu<S: FftSimd8>(S::Amm, S::Amm);
+pub struct BmmEmu<S: FftSimd8>(pub S::Amm, pub S::Amm);
 
 impl Copy for XmmEmu {}
 impl<S: FftSimd1> Copy for YmmEmu<S> {}
@@ -343,16 +343,16 @@ impl FftSimd1 for Scalar {
 macro_rules! fft_simd2_emu {
     ($ty: ty) => {
         impl FftSimd2 for $ty {
-            type Ymm = YmmEmu<Self>;
+            type Ymm = crate::fft_simd::YmmEmu<Self>;
 
             #[inline(always)]
             unsafe fn cmplx2(a: f64, b: f64, c: f64, d: f64) -> Self::Ymm {
-                YmmEmu(Self::cmplx(a, b), Self::cmplx(c, d))
+                crate::fft_simd::YmmEmu(Self::cmplx(a, b), Self::cmplx(c, d))
             }
 
             #[inline(always)]
             unsafe fn getpz2(z: *const c64) -> Self::Ymm {
-                YmmEmu(Self::getpz(&*z.add(0)), Self::getpz(&*z.add(1)))
+                crate::fft_simd::YmmEmu(Self::getpz(&*z.add(0)), Self::getpz(&*z.add(1)))
             }
 
             #[inline(always)]
@@ -363,72 +363,72 @@ macro_rules! fft_simd2_emu {
 
             #[inline(always)]
             unsafe fn cnjpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::cnjpz(xy.0), Self::cnjpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::cnjpz(xy.0), Self::cnjpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn jxpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::jxpz(xy.0), Self::jxpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::jxpz(xy.0), Self::jxpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn negpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::negpz(xy.0), Self::negpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::negpz(xy.0), Self::negpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn addpz2(a: Self::Ymm, b: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::addpz(a.0, b.0), Self::addpz(a.1, b.1))
+                crate::fft_simd::YmmEmu(Self::addpz(a.0, b.0), Self::addpz(a.1, b.1))
             }
 
             #[inline(always)]
             unsafe fn subpz2(a: Self::Ymm, b: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::subpz(a.0, b.0), Self::subpz(a.1, b.1))
+                crate::fft_simd::YmmEmu(Self::subpz(a.0, b.0), Self::subpz(a.1, b.1))
             }
 
             #[inline(always)]
             unsafe fn mulpd2(a: Self::Ymm, b: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::mulpd(a.0, b.0), Self::mulpd(a.1, b.1))
+                crate::fft_simd::YmmEmu(Self::mulpd(a.0, b.0), Self::mulpd(a.1, b.1))
             }
 
             #[inline(always)]
             unsafe fn mulpz2(ab: Self::Ymm, xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::mulpz(ab.0, xy.0), Self::mulpz(ab.1, xy.1))
+                crate::fft_simd::YmmEmu(Self::mulpz(ab.0, xy.0), Self::mulpz(ab.1, xy.1))
             }
 
             #[inline(always)]
             unsafe fn v8xpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::v8xpz(xy.0), Self::v8xpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::v8xpz(xy.0), Self::v8xpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn w8xpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::w8xpz(xy.0), Self::w8xpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::w8xpz(xy.0), Self::w8xpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn h1xpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::h1xpz(xy.0), Self::h1xpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::h1xpz(xy.0), Self::h1xpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn h3xpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::h3xpz(xy.0), Self::h3xpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::h3xpz(xy.0), Self::h3xpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn hfxpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::hfxpz(xy.0), Self::hfxpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::hfxpz(xy.0), Self::hfxpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn hdxpz2(xy: Self::Ymm) -> Self::Ymm {
-                YmmEmu(Self::hdxpz(xy.0), Self::hdxpz(xy.1))
+                crate::fft_simd::YmmEmu(Self::hdxpz(xy.0), Self::hdxpz(xy.1))
             }
 
             #[inline(always)]
             unsafe fn duppz2(x: Self::Xmm) -> Self::Ymm {
-                YmmEmu(x, x)
+                crate::fft_simd::YmmEmu(x, x)
             }
 
             #[inline(always)]
@@ -438,22 +438,22 @@ macro_rules! fft_simd2_emu {
 
             #[inline(always)]
             unsafe fn cat(a: Self::Xmm, b: Self::Xmm) -> Self::Ymm {
-                YmmEmu(a, b)
+                crate::fft_simd::YmmEmu(a, b)
             }
 
             #[inline(always)]
             unsafe fn catlo(ax: Self::Ymm, by: Self::Ymm) -> Self::Ymm {
-                YmmEmu(ax.0, by.0)
+                crate::fft_simd::YmmEmu(ax.0, by.0)
             }
 
             #[inline(always)]
             unsafe fn cathi(ax: Self::Ymm, by: Self::Ymm) -> Self::Ymm {
-                YmmEmu(ax.1, by.1)
+                crate::fft_simd::YmmEmu(ax.1, by.1)
             }
 
             #[inline(always)]
             unsafe fn swaplohi(ab: Self::Ymm) -> Self::Ymm {
-                YmmEmu(ab.1, ab.0)
+                crate::fft_simd::YmmEmu(ab.1, ab.0)
             }
 
             #[inline(always)]

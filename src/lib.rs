@@ -40,7 +40,15 @@ use num_complex::Complex;
 
 mod fft_simd;
 mod twiddles;
+
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 mod x86;
+
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+
+#[cfg(target_arch = "wasm32")]
+mod wasm32;
 
 pub mod dif4;
 
