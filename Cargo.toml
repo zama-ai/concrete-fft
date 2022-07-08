@@ -12,7 +12,7 @@ dyn-stack = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"
-rustfft = { version = "6.0", path = "../RustFFT" }
+rustfft = "6.0"
 fftw-sys = { version = "0.6", default-features = false, features = ["system"] }
 rand = "0.8"
 
