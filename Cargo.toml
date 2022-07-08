@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fftw-sys = { version = "0.6", default-features = false, features = ["system"] }
 num-complex = "0.4"
 lazy_static = "1.4"
 dyn-stack = "0.3"
@@ -14,7 +13,7 @@ dyn-stack = "0.3"
 [dev-dependencies]
 criterion = "0.3"
 rustfft = { version = "6.0", path = "../RustFFT" }
-fftw = { version = "0.7", default-features = false, features = ["system"] }
+fftw-sys = { version = "0.6", default-features = false, features = ["system"] }
 rand = "0.8"
 
 [build-dependencies]

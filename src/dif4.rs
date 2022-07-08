@@ -1,5 +1,5 @@
+use crate::fft_simd::FftSimd16;
 use crate::twiddles::{twid, twid_t};
-use crate::x86::FftSimd16;
 use crate::{c64, MAX_EXP};
 use dyn_stack::DynStack;
 
@@ -468,7 +468,7 @@ mod tests {
             let mut w = vec![z; 2 * n];
 
             crate::twiddles::init_wt(4, n, w.as_mut_ptr());
-            let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_req(n).unwrap());
+            let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_scratch(n).unwrap());
             let mut stack = DynStack::new(&mut mem);
 
             fwd_fn(&mut arr_fwd, &w, stack.rb_mut());
@@ -510,16 +510,14 @@ mod tests {
 
         let mut arr_roundtrip = arr_orig.clone();
 
-        unsafe {
-            let mut w = vec![z; 2 * n];
+        let mut w = vec![z; 2 * n];
 
-            crate::twiddles::init_wt(4, n, w.as_mut_ptr());
-            let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_req(n).unwrap());
-            let mut stack = DynStack::new(&mut mem);
+        crate::init_twiddles(n, &mut w);
+        let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_scratch(n).unwrap());
+        let mut stack = DynStack::new(&mut mem);
 
-            fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
-            inv_fn(&mut arr_roundtrip, &w, stack);
-        }
+        fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
+        inv_fn(&mut arr_roundtrip, &w, stack);
 
         for z in &mut arr_roundtrip {
             *z /= n as f64;

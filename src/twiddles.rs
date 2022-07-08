@@ -18,10 +18,14 @@ pub unsafe fn init_wt(r: usize, big_n: usize, w: *mut c64) {
     let nr = big_n / r;
     let theta = -2.0 * core::f64::consts::PI / big_n as f64;
 
+    for i in 0..2 * big_n {
+        (*w.add(i)).re = f64::NAN;
+        (*w.add(i)).im = f64::NAN;
+    }
+
     for p in 0..nr {
         for k in 1..r {
-            let c = (theta * (k * p) as f64).cos();
-            let s = (theta * (k * p) as f64).sin();
+            let (s, c) = (theta * (k * p) as f64).sin_cos();
             let z = c64::new(c, s);
             *w.add(p + (k - 1) * nr) = z;
             *w.add(big_n + r * p + k) = z;
