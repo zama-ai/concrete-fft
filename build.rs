@@ -2,7 +2,6 @@ use eyre::{eyre, Result};
 use std::env;
 use std::fmt::Write;
 use std::fs;
-use std::mem::swap;
 use std::path::Path;
 
 const MAX_POW: usize = 17;
@@ -12,7 +11,103 @@ fn ascii_to_titlecase(s: &str) -> String {
     s[0..1].to_uppercase() + &s[1..]
 }
 
-fn gen_generic_dif4_fn(n: usize, direction: &str) -> Result<String> {
+type GenFn = fn(
+    body: &mut String,
+    n: usize,
+    s: usize,
+    base_case: usize,
+    factor: usize,
+    eo: bool,
+    first: &str,
+    second: &str,
+    direction: &str,
+) -> Result<()>;
+
+#[allow(clippy::too_many_arguments)]
+fn gen_generic_dif_body(
+    body: &mut String,
+    n: usize,
+    s: usize,
+    base_case: usize,
+    factor: usize,
+    eo: bool,
+    first: &str,
+    second: &str,
+    direction: &str,
+) -> Result<()> {
+    if n <= base_case {
+        if n > 1 {
+            write!(
+                body,
+                "\n    {direction}end_{n}_{}::<S>({n}, {s}, {eo}, {first}, {second});",
+                if s == 1 { "1" } else { "s" },
+            )?;
+        }
+    } else {
+        write!(
+            body,
+            "\n    {direction}core_{}::<S>({n}, {s}, {first}, {second}, w);",
+            if s == 1 { "1" } else { "s" }
+        )?;
+        gen_generic_dif_body(
+            body,
+            n / factor,
+            s * factor,
+            base_case,
+            factor,
+            !eo,
+            second,
+            first,
+            direction,
+        )?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gen_generic_dit_body(
+    body: &mut String,
+    n: usize,
+    s: usize,
+    base_case: usize,
+    factor: usize,
+    eo: bool,
+    first: &str,
+    second: &str,
+    direction: &str,
+) -> Result<()> {
+    if n <= base_case {
+        if n > 1 {
+            write!(
+                body,
+                "\n    {direction}end_{n}_{}::<S>({n}, {s}, {eo}, {first}, {second});",
+                if s == 1 { "1" } else { "s" },
+            )?;
+        }
+    } else {
+        gen_generic_dit_body(
+            body,
+            n / factor,
+            s * factor,
+            base_case,
+            factor,
+            !eo,
+            second,
+            first,
+            direction,
+        )?;
+        write!(
+            body,
+            "\n    {direction}core_{}::<S>({n}, {s}, {first}, {second}, w);",
+            if s == 1 { "1" } else { "s" }
+        )?;
+    }
+
+    Ok(())
+}
+
+fn gen_generic_fn(n: usize, factor: usize, gen_fn: GenFn, direction: &str) -> Result<String> {
     assert!(n.is_power_of_two());
     let sig = format!(
         "#[inline(always)]#[allow(unused_variables)]\nunsafe fn {direction}fft_{n}<S: FftSimd16>\
@@ -20,37 +115,12 @@ fn gen_generic_dif4_fn(n: usize, direction: &str) -> Result<String> {
     );
 
     let mut body = String::new();
-    let mut first = "x";
-    let mut second = "y";
-    let mut eo = false;
-    let mut n = n;
-    let mut s: usize = 1;
-
-    while n > 4 {
-        write!(
-            body,
-            "\n    {direction}core_{}::<S>({n}, {s}, {first}, {second}, w);",
-            if s == 1 { "1" } else { "s" }
-        )?;
-
-        n /= 4;
-        s *= 4;
-        swap(&mut first, &mut second);
-        eo = !eo;
-    }
-
-    if n > 1 {
-        write!(
-            body,
-            "\n    {direction}end_{n}_{}::<S>({n}, {s}, {eo}, {first}, {second});",
-            if s == 1 { "1" } else { "s" },
-        )?;
-    }
+    gen_fn(&mut body, n, 1, factor, factor, false, "x", "y", direction)?;
 
     Ok(format!("{} {{{}\n}}", sig, body))
 }
 
-fn gen_runtime_dif4_fn(n: usize, direction: &str, arch_module: &str, feat: &str) -> String {
+fn gen_runtime_fn(n: usize, direction: &str, arch_module: &str, feat: &str) -> String {
     let feat_struct = ascii_to_titlecase(feat);
     format!(
         "
@@ -127,22 +197,22 @@ fn gen_runtime_dispatch_fn_ptr(arch_module: &str, direction: &str) -> Result<Str
     }
 }
 
-fn write_dif4(out_dir: &Path, arch_module: &str, features: &[&str]) -> Result<()> {
-    let dest_path = out_dir.join("dif4.rs");
-
+fn write_to(
+    dest_path: &Path,
+    factor: usize,
+    gen_fn: GenFn,
+    arch_module: &str,
+    features: &[&str],
+) -> Result<()> {
     let mut code = String::new();
 
     for i in 0..MAX_POW {
         let n = 1usize << i;
 
         for direction in DIRECTIONS {
-            writeln!(code, "{}", gen_generic_dif4_fn(n, direction)?)?;
+            writeln!(code, "{}", gen_generic_fn(n, factor, gen_fn, direction)?)?;
             for feat in features.iter().cloned() {
-                writeln!(
-                    code,
-                    "{}",
-                    gen_runtime_dif4_fn(n, direction, arch_module, feat)
-                )?;
+                writeln!(code, "{}", gen_runtime_fn(n, direction, arch_module, feat))?;
             }
         }
     }
@@ -159,7 +229,7 @@ fn write_dif4(out_dir: &Path, arch_module: &str, features: &[&str]) -> Result<()
     }
     code.push_str("\n}");
 
-    fs::write(&dest_path, &code)?;
+    fs::write(dest_path, &code)?;
 
     Ok(())
 }
@@ -180,7 +250,53 @@ fn main() -> Result<()> {
         _ => ("fft_simd", vec!["scalar"]),
     };
 
-    write_dif4(out_dir, arch_module, &features)?;
+    write_to(
+        &out_dir.join("dif4.rs"),
+        4,
+        gen_generic_dif_body,
+        arch_module,
+        &features,
+    )?;
+
+    write_to(
+        &out_dir.join("dit4.rs"),
+        4,
+        gen_generic_dit_body,
+        arch_module,
+        &features,
+    )?;
+
+    write_to(
+        &out_dir.join("dif8.rs"),
+        8,
+        gen_generic_dif_body,
+        arch_module,
+        &features,
+    )?;
+
+    write_to(
+        &out_dir.join("dit8.rs"),
+        8,
+        gen_generic_dit_body,
+        arch_module,
+        &features,
+    )?;
+
+    write_to(
+        &out_dir.join("dif16.rs"),
+        8,
+        gen_generic_dif_body,
+        arch_module,
+        &features,
+    )?;
+
+    write_to(
+        &out_dir.join("dit16.rs"),
+        8,
+        gen_generic_dit_body,
+        arch_module,
+        &features,
+    )?;
 
     println!("cargo:rerun-if-changed=build.rs");
     Ok(())

@@ -38,20 +38,21 @@ pub(crate) unsafe fn fwdcore_s<S: FftSimd16>(
             let xq_sp = x.add(q + sp);
             let yq_s4p = y.add(q + s4p);
 
-            let a = S::getpz4(xq_sp.add(big_n0));
-            let c = S::getpz4(xq_sp.add(big_n2));
+            let a = S::getpz4(yq_s4p.add(0));
+            let b = S::mulpz4(w1p, S::getpz4(yq_s4p.add(s)));
+            let c = S::mulpz4(w2p, S::getpz4(yq_s4p.add(s * 2)));
+            let d = S::mulpz4(w3p, S::getpz4(yq_s4p.add(s * 3)));
+
             let apc = S::addpz4(a, c);
             let amc = S::subpz4(a, c);
 
-            let b = S::getpz4(xq_sp.add(big_n1));
-            let d = S::getpz4(xq_sp.add(big_n3));
             let bpd = S::addpz4(b, d);
             let jbmd = S::jxpz4(S::subpz4(b, d));
 
-            S::setpz4(yq_s4p.add(0), S::addpz4(apc, bpd));
-            S::setpz4(yq_s4p.add(s), S::mulpz4(w1p, S::subpz4(amc, jbmd)));
-            S::setpz4(yq_s4p.add(s * 2), S::mulpz4(w2p, S::subpz4(apc, bpd)));
-            S::setpz4(yq_s4p.add(s * 3), S::mulpz4(w3p, S::addpz4(amc, jbmd)));
+            S::setpz4(xq_sp.add(big_n0), S::addpz4(apc, bpd));
+            S::setpz4(xq_sp.add(big_n1), S::subpz4(amc, jbmd));
+            S::setpz4(xq_sp.add(big_n2), S::subpz4(apc, bpd));
+            S::setpz4(xq_sp.add(big_n3), S::addpz4(amc, jbmd));
 
             q += 4;
         }
@@ -81,37 +82,29 @@ pub(crate) unsafe fn fwdcore_1<S: FftSimd16>(
         let x_p = x.add(p);
         let y_4p = y.add(4 * p);
 
-        let a = S::getpz2(x_p.add(big_n0));
-        let c = S::getpz2(x_p.add(big_n2));
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-
-        let b = S::getpz2(x_p.add(big_n1));
-        let d = S::getpz2(x_p.add(big_n3));
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
-
         let w1p = S::getpz2(twid(4, big_n, 1, w, p));
         let w2p = S::getpz2(twid(4, big_n, 2, w, p));
         let w3p = S::getpz2(twid(4, big_n, 3, w, p));
 
-        let aa = S::addpz2(apc, bpd);
-        let bb = S::mulpz2(w1p, S::subpz2(amc, jbmd));
-        let cc = S::mulpz2(w2p, S::subpz2(apc, bpd));
-        let dd = S::mulpz2(w3p, S::addpz2(amc, jbmd));
+        let ab0 = S::getpz2(y_4p.add(0));
+        let cd0 = S::getpz2(y_4p.add(2));
+        let ab1 = S::getpz2(y_4p.add(4));
+        let cd1 = S::getpz2(y_4p.add(6));
 
-        {
-            let ab = S::catlo(aa, bb);
-            S::setpz2(y_4p.add(0), ab);
-            let cd = S::catlo(cc, dd);
-            S::setpz2(y_4p.add(2), cd);
-        }
-        {
-            let ab = S::cathi(aa, bb);
-            S::setpz2(y_4p.add(4), ab);
-            let cd = S::cathi(cc, dd);
-            S::setpz2(y_4p.add(6), cd);
-        }
+        let a = S::catlo(ab0, ab1);
+        let b = S::mulpz2(w1p, S::cathi(ab0, ab1));
+        let c = S::mulpz2(w2p, S::catlo(cd0, cd1));
+        let d = S::mulpz2(w3p, S::cathi(cd0, cd1));
+
+        let apc = S::addpz2(a, c);
+        let amc = S::subpz2(a, c);
+        let bpd = S::addpz2(b, d);
+        let jbmd = S::jxpz2(S::subpz2(b, d));
+
+        S::setpz2(x_p.add(big_n0), S::addpz2(apc, bpd));
+        S::setpz2(x_p.add(big_n1), S::subpz2(amc, jbmd));
+        S::setpz2(x_p.add(big_n2), S::subpz2(apc, bpd));
+        S::setpz2(x_p.add(big_n3), S::addpz2(amc, jbmd));
 
         p += 2;
     }
@@ -138,20 +131,20 @@ pub(crate) unsafe fn fwdend_4_s<S: FftSimd16>(
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let a = S::getpz2(xq.add(0));
-        let b = S::getpz2(xq.add(s));
-        let c = S::getpz2(xq.add(s * 2));
-        let d = S::getpz2(xq.add(s * 3));
+        let a = S::getpz2(zq.add(0));
+        let b = S::getpz2(zq.add(s));
+        let c = S::getpz2(zq.add(s * 2));
+        let d = S::getpz2(zq.add(s * 3));
 
         let apc = S::addpz2(a, c);
         let amc = S::subpz2(a, c);
         let bpd = S::addpz2(b, d);
         let jbmd = S::jxpz2(S::subpz2(b, d));
 
-        S::setpz2(zq.add(0), S::addpz2(apc, bpd));
-        S::setpz2(zq.add(s), S::subpz2(amc, jbmd));
-        S::setpz2(zq.add(s * 2), S::subpz2(apc, bpd));
-        S::setpz2(zq.add(s * 3), S::addpz2(amc, jbmd));
+        S::setpz2(xq.add(0), S::addpz2(apc, bpd));
+        S::setpz2(xq.add(s), S::subpz2(amc, jbmd));
+        S::setpz2(xq.add(s * 2), S::subpz2(apc, bpd));
+        S::setpz2(xq.add(s * 3), S::addpz2(amc, jbmd));
 
         q += 2;
     }
@@ -169,20 +162,20 @@ pub(crate) unsafe fn fwdend_4_1<S: FftSimd16>(
     debug_assert_eq!(s, 1);
     let z = if eo { y } else { x };
 
-    let a = S::getpz(&*x.add(0));
-    let b = S::getpz(&*x.add(1));
-    let c = S::getpz(&*x.add(2));
-    let d = S::getpz(&*x.add(3));
+    let a = S::getpz(&*z.add(0));
+    let b = S::getpz(&*z.add(1));
+    let c = S::getpz(&*z.add(2));
+    let d = S::getpz(&*z.add(3));
 
     let apc = S::addpz(a, c);
     let amc = S::subpz(a, c);
     let bpd = S::addpz(b, d);
     let jbmd = S::jxpz(S::subpz(b, d));
 
-    S::setpz(z.add(0), S::addpz(apc, bpd));
-    S::setpz(z.add(1), S::subpz(amc, jbmd));
-    S::setpz(z.add(2), S::subpz(apc, bpd));
-    S::setpz(z.add(3), S::addpz(amc, jbmd));
+    S::setpz(x.add(0), S::addpz(apc, bpd));
+    S::setpz(x.add(1), S::subpz(amc, jbmd));
+    S::setpz(x.add(2), S::subpz(apc, bpd));
+    S::setpz(x.add(3), S::addpz(amc, jbmd));
 }
 
 #[inline(always)]
@@ -206,11 +199,11 @@ pub(crate) unsafe fn fwdend_2_s<S: FftSimd16>(
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let a = S::getpz2(xq.add(0));
-        let b = S::getpz2(xq.add(s));
+        let a = S::getpz2(zq.add(0));
+        let b = S::getpz2(zq.add(s));
 
-        S::setpz2(zq.add(0), S::addpz2(a, b));
-        S::setpz2(zq.add(s), S::subpz2(a, b));
+        S::setpz2(xq.add(0), S::addpz2(a, b));
+        S::setpz2(xq.add(s), S::subpz2(a, b));
 
         q += 2;
     }
@@ -228,11 +221,11 @@ pub(crate) unsafe fn fwdend_2_1<S: FftSimd16>(
     debug_assert_eq!(s, 1);
     let z = if eo { y } else { x };
 
-    let a = S::getpz(&*x.add(0));
-    let b = S::getpz(&*x.add(1));
+    let a = S::getpz(&*z.add(0));
+    let b = S::getpz(&*z.add(1));
 
-    S::setpz(z.add(0), S::addpz(a, b));
-    S::setpz(z.add(1), S::subpz(a, b));
+    S::setpz(x.add(0), S::addpz(a, b));
+    S::setpz(x.add(1), S::subpz(a, b));
 }
 
 // backward butterfly
@@ -256,9 +249,9 @@ pub(crate) unsafe fn invcore_s<S: FftSimd16>(
     for p in 0..m {
         let sp = s * p;
         let s4p = 4 * sp;
-        let w1p = S::duppz5(&(&*twid_t(4, big_n, 1, w, sp)).conj());
-        let w2p = S::duppz5(&(&*twid_t(4, big_n, 2, w, sp)).conj());
-        let w3p = S::duppz5(&(&*twid_t(4, big_n, 3, w, sp)).conj());
+        let w1p = S::duppz5(&(*twid_t(4, big_n, 1, w, sp)).conj());
+        let w2p = S::duppz5(&(*twid_t(4, big_n, 2, w, sp)).conj());
+        let w3p = S::duppz5(&(*twid_t(4, big_n, 3, w, sp)).conj());
 
         let mut q = 0;
         loop {
@@ -269,20 +262,21 @@ pub(crate) unsafe fn invcore_s<S: FftSimd16>(
             let xq_sp = x.add(q + sp);
             let yq_s4p = y.add(q + s4p);
 
-            let a = S::getpz4(xq_sp.add(big_n0));
-            let c = S::getpz4(xq_sp.add(big_n2));
+            let a = S::getpz4(yq_s4p.add(0));
+            let b = S::mulpz4(w1p, S::getpz4(yq_s4p.add(s)));
+            let c = S::mulpz4(w2p, S::getpz4(yq_s4p.add(s * 2)));
+            let d = S::mulpz4(w3p, S::getpz4(yq_s4p.add(s * 3)));
+
             let apc = S::addpz4(a, c);
             let amc = S::subpz4(a, c);
 
-            let b = S::getpz4(xq_sp.add(big_n1));
-            let d = S::getpz4(xq_sp.add(big_n3));
             let bpd = S::addpz4(b, d);
             let jbmd = S::jxpz4(S::subpz4(b, d));
 
-            S::setpz4(yq_s4p.add(0), S::addpz4(apc, bpd));
-            S::setpz4(yq_s4p.add(s), S::mulpz4(w1p, S::addpz4(amc, jbmd)));
-            S::setpz4(yq_s4p.add(s * 2), S::mulpz4(w2p, S::subpz4(apc, bpd)));
-            S::setpz4(yq_s4p.add(s * 3), S::mulpz4(w3p, S::subpz4(amc, jbmd)));
+            S::setpz4(xq_sp.add(big_n0), S::addpz4(apc, bpd));
+            S::setpz4(xq_sp.add(big_n1), S::addpz4(amc, jbmd));
+            S::setpz4(xq_sp.add(big_n2), S::subpz4(apc, bpd));
+            S::setpz4(xq_sp.add(big_n3), S::subpz4(amc, jbmd));
 
             q += 4;
         }
@@ -312,37 +306,29 @@ pub(crate) unsafe fn invcore_1<S: FftSimd16>(
         let x_p = x.add(p);
         let y_4p = y.add(4 * p);
 
-        let a = S::getpz2(x_p.add(big_n0));
-        let c = S::getpz2(x_p.add(big_n2));
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-
-        let b = S::getpz2(x_p.add(big_n1));
-        let d = S::getpz2(x_p.add(big_n3));
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
-
         let w1p = S::cnjpz2(S::getpz2(twid(4, big_n, 1, w, p)));
         let w2p = S::cnjpz2(S::getpz2(twid(4, big_n, 2, w, p)));
         let w3p = S::cnjpz2(S::getpz2(twid(4, big_n, 3, w, p)));
 
-        let aa = S::addpz2(apc, bpd);
-        let bb = S::mulpz2(w1p, S::addpz2(amc, jbmd));
-        let cc = S::mulpz2(w2p, S::subpz2(apc, bpd));
-        let dd = S::mulpz2(w3p, S::subpz2(amc, jbmd));
+        let ab0 = S::getpz2(y_4p.add(0));
+        let cd0 = S::getpz2(y_4p.add(2));
+        let ab1 = S::getpz2(y_4p.add(4));
+        let cd1 = S::getpz2(y_4p.add(6));
 
-        {
-            let ab = S::catlo(aa, bb);
-            S::setpz2(y_4p.add(0), ab);
-            let cd = S::catlo(cc, dd);
-            S::setpz2(y_4p.add(2), cd);
-        }
-        {
-            let ab = S::cathi(aa, bb);
-            S::setpz2(y_4p.add(4), ab);
-            let cd = S::cathi(cc, dd);
-            S::setpz2(y_4p.add(6), cd);
-        }
+        let a = S::catlo(ab0, ab1);
+        let b = S::mulpz2(w1p, S::cathi(ab0, ab1));
+        let c = S::mulpz2(w2p, S::catlo(cd0, cd1));
+        let d = S::mulpz2(w3p, S::cathi(cd0, cd1));
+
+        let apc = S::addpz2(a, c);
+        let amc = S::subpz2(a, c);
+        let bpd = S::addpz2(b, d);
+        let jbmd = S::jxpz2(S::subpz2(b, d));
+
+        S::setpz2(x_p.add(big_n0), S::addpz2(apc, bpd));
+        S::setpz2(x_p.add(big_n1), S::addpz2(amc, jbmd));
+        S::setpz2(x_p.add(big_n2), S::subpz2(apc, bpd));
+        S::setpz2(x_p.add(big_n3), S::subpz2(amc, jbmd));
 
         p += 2;
     }
@@ -369,20 +355,20 @@ pub(crate) unsafe fn invend_4_s<S: FftSimd16>(
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let a = S::getpz2(xq.add(0));
-        let b = S::getpz2(xq.add(s));
-        let c = S::getpz2(xq.add(s * 2));
-        let d = S::getpz2(xq.add(s * 3));
+        let a = S::getpz2(zq.add(0));
+        let b = S::getpz2(zq.add(s));
+        let c = S::getpz2(zq.add(s * 2));
+        let d = S::getpz2(zq.add(s * 3));
 
         let apc = S::addpz2(a, c);
         let amc = S::subpz2(a, c);
         let bpd = S::addpz2(b, d);
         let jbmd = S::jxpz2(S::subpz2(b, d));
 
-        S::setpz2(zq.add(0), S::addpz2(apc, bpd));
-        S::setpz2(zq.add(s), S::addpz2(amc, jbmd));
-        S::setpz2(zq.add(s * 2), S::subpz2(apc, bpd));
-        S::setpz2(zq.add(s * 3), S::subpz2(amc, jbmd));
+        S::setpz2(xq.add(0), S::addpz2(apc, bpd));
+        S::setpz2(xq.add(s), S::addpz2(amc, jbmd));
+        S::setpz2(xq.add(s * 2), S::subpz2(apc, bpd));
+        S::setpz2(xq.add(s * 3), S::subpz2(amc, jbmd));
 
         q += 2;
     }
@@ -400,20 +386,20 @@ pub(crate) unsafe fn invend_4_1<S: FftSimd16>(
     debug_assert_eq!(s, 1);
     let z = if eo { y } else { x };
 
-    let a = S::getpz(&*x.add(0));
-    let b = S::getpz(&*x.add(1));
-    let c = S::getpz(&*x.add(2));
-    let d = S::getpz(&*x.add(3));
+    let a = S::getpz(&*z.add(0));
+    let b = S::getpz(&*z.add(1));
+    let c = S::getpz(&*z.add(2));
+    let d = S::getpz(&*z.add(3));
 
     let apc = S::addpz(a, c);
     let amc = S::subpz(a, c);
     let bpd = S::addpz(b, d);
     let jbmd = S::jxpz(S::subpz(b, d));
 
-    S::setpz(z.add(0), S::addpz(apc, bpd));
-    S::setpz(z.add(1), S::addpz(amc, jbmd));
-    S::setpz(z.add(2), S::subpz(apc, bpd));
-    S::setpz(z.add(3), S::subpz(amc, jbmd));
+    S::setpz(x.add(0), S::addpz(apc, bpd));
+    S::setpz(x.add(1), S::addpz(amc, jbmd));
+    S::setpz(x.add(2), S::subpz(apc, bpd));
+    S::setpz(x.add(3), S::subpz(amc, jbmd));
 }
 
 #[inline(always)]
@@ -438,21 +424,13 @@ pub(crate) unsafe fn invend_2_1<S: FftSimd16>(
     fwdend_2_1::<S>(n, s, eo, x, y);
 }
 
-include!(concat!(env!("OUT_DIR"), "/dif4.rs"));
+include!(concat!(env!("OUT_DIR"), "/dit4.rs"));
 
 /// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
 /// `twiddles` must be of length `2*n`.
 pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
-    assert!(n.is_power_of_two());
-    let i = n.trailing_zeros() as usize;
-    assert!(i < MAX_EXP);
-    assert_eq!(twiddles.len(), 2 * n);
-
-    unsafe {
-        crate::twiddles::init_wt(4, n, twiddles.as_mut_ptr());
-    }
+    crate::dif4::init_twiddles(n, twiddles);
 }
-
 impl_main_fn!(fwd, &*FWD_FN_ARRAY);
 impl_main_fn!(inv, &*INV_FN_ARRAY);
 

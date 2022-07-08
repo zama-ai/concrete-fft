@@ -2,9 +2,9 @@ use crate::c64;
 use core::fmt::Debug;
 
 #[allow(clippy::excessive_precision)]
-pub const H1X: f64 = 0.923879532511286762010323247995557949;
+pub const H1X: f64 = 0.923879532511286762010323247995557949_f64;
 #[allow(clippy::excessive_precision)]
-pub const H1Y: f64 = -0.382683432365089757574419179753100195;
+pub const H1Y: f64 = -0.382683432365089757574419179753100195_f64;
 pub use core::f64::consts::FRAC_1_SQRT_2;
 
 #[derive(Debug, Copy, Clone)]

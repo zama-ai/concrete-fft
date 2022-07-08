@@ -4,7 +4,7 @@
 //! # Example
 //!
 //! ```
-//! use binfft::{c64, init_twiddles, fwd, inv, fft_scratch};
+//! use binfft::{c64, dif4::{init_twiddles, fwd, inv}, fft_scratch};
 //! use dyn_stack::{uninit_mem_in_global, DynStack, ReborrowMut};
 //! use num_complex::ComplexFloat;
 //!
@@ -51,6 +51,9 @@ mod aarch64;
 mod wasm32;
 
 pub mod dif4;
+pub mod dif8;
+
+pub mod dit4;
 
 /// Complex type containing two `f64` values.
 #[allow(non_camel_case_types)]
@@ -64,25 +67,27 @@ pub fn fft_scratch(n: usize) -> Result<StackReq, SizeOverflow> {
     StackReq::try_new_aligned::<c64>(n, 64)
 }
 
-/// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
-/// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
-    assert!(n.is_power_of_two());
-    let i = n.trailing_zeros() as usize;
-    assert!(i < MAX_EXP);
-    assert_eq!(twiddles.len(), 2 * n);
+macro_rules! impl_main_fn {
+    ($(#[$attr: meta])? $name: ident, $array_expr: expr) => {
+        $(#[$attr])*
+        pub fn $name(data: &mut [c64], twiddles: &[c64], stack: DynStack) {
+            let n = data.len();
+            let i = n.trailing_zeros() as usize;
 
-    unsafe {
-        twiddles::init_wt(4, n, twiddles.as_mut_ptr());
-    }
+            assert!(n.is_power_of_two());
+            assert!(i < MAX_EXP);
+            assert_eq!(twiddles.len(), 2 * n);
+
+            let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, 64);
+            let scratch = scratch.as_mut_ptr();
+            let data = data.as_mut_ptr();
+            let w = twiddles.as_ptr();
+
+            unsafe {
+                ($array_expr)[i](data, scratch as *mut c64, w);
+            }
+        }
+    };
 }
 
-/// Execute forward Fourier transform using the computed twiddles.
-pub fn fwd(data: &mut [c64], twiddles: &[c64], stack: dyn_stack::DynStack) {
-    dif4::fwd(data, twiddles, stack);
-}
-
-/// Execute inverse Fourier transform using the computed twiddles.
-pub fn inv(data: &mut [c64], twiddles: &[c64], stack: dyn_stack::DynStack) {
-    dif4::inv(data, twiddles, stack);
-}
+pub(crate) use impl_main_fn;

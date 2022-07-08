@@ -108,7 +108,7 @@ impl FftSimd1 for Sse2 {
     unsafe fn w8xpz(xy: Self::Xmm) -> Self::Xmm {
         let rr = Self::cmplx(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
         let ymx = Self::cnjpz(_mm_shuffle_pd::<0b01>(xy, xy));
-        Self::mulpz(rr, _mm_add_pd(xy, ymx))
+        Self::mulpd(rr, _mm_add_pd(xy, ymx))
     }
 
     #[inline(always)]

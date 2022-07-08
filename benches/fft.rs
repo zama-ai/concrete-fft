@@ -143,14 +143,27 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // binfft
         {
             let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-            let (mut w, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(2 * n, 64, |_| z);
-            binfft::init_twiddles(n, &mut w);
+            let (w, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(2 * n, 64, |_| z);
 
-            c.bench_function(&format!("binfft-fwd-{}", n), |b| {
-                b.iter(|| binfft::fwd(&mut dst, &w, stack.rb_mut()))
+            c.bench_function(&format!("dif4-fwd-{}", n), |b| {
+                b.iter(|| binfft::dif4::fwd(&mut dst, &w, stack.rb_mut()))
             });
-            c.bench_function(&format!("binfft-inv-{}", n), |b| {
-                b.iter(|| binfft::inv(&mut dst, &w, stack.rb_mut()))
+            c.bench_function(&format!("dif4-inv-{}", n), |b| {
+                b.iter(|| binfft::dif4::inv(&mut dst, &w, stack.rb_mut()))
+            });
+
+            c.bench_function(&format!("dit4-fwd-{}", n), |b| {
+                b.iter(|| binfft::dit4::fwd(&mut dst, &w, stack.rb_mut()))
+            });
+            c.bench_function(&format!("dit4-inv-{}", n), |b| {
+                b.iter(|| binfft::dit4::inv(&mut dst, &w, stack.rb_mut()))
+            });
+
+            c.bench_function(&format!("dif8-fwd-{}", n), |b| {
+                b.iter(|| binfft::dif8::fwd(&mut dst, &w, stack.rb_mut()))
+            });
+            c.bench_function(&format!("dif8-inv-{}", n), |b| {
+                b.iter(|| binfft::dif8::inv(&mut dst, &w, stack.rb_mut()))
             });
         }
 
