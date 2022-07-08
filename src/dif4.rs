@@ -558,17 +558,20 @@ mod tests {
             let n = 1usize << i;
             test_fft_generic(n, fwd_scalar, inv_scalar);
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-            {
-                #[cfg(target_feature = "fma")]
-                test_fft_generic(n, fwd_fma, inv_fma);
-                #[cfg(target_feature = "avx")]
-                test_fft_generic(n, fwd_avx, inv_avx);
-                #[cfg(target_feature = "sse3")]
-                test_fft_generic(n, fwd_sse3, inv_sse3);
-                #[cfg(target_feature = "sse2")]
-                test_fft_generic(n, fwd_sse2, inv_sse2);
-            }
+            #[cfg(target_feature = "fma")]
+            test_fft_generic(n, fwd_fma, inv_fma);
+            #[cfg(target_feature = "avx")]
+            test_fft_generic(n, fwd_avx, inv_avx);
+            #[cfg(target_feature = "sse3")]
+            test_fft_generic(n, fwd_sse3, inv_sse3);
+            #[cfg(target_feature = "sse2")]
+            test_fft_generic(n, fwd_sse2, inv_sse2);
+
+            #[cfg(target_feature = "neon")]
+            test_fft_generic(n, fwd_neon, inv_neon);
+
+            #[cfg(target_feature = "simd128")]
+            test_fft_generic(n, fwd_simd128, inv_simd128);
         }
     }
 
@@ -578,17 +581,20 @@ mod tests {
             let n = 1usize << i;
             test_roundtrip_generic(n, fwd_scalar, inv_scalar);
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-            {
-                #[cfg(target_feature = "fma")]
-                test_roundtrip_generic(n, fwd_fma, inv_fma);
-                #[cfg(target_feature = "avx")]
-                test_roundtrip_generic(n, fwd_avx, inv_avx);
-                #[cfg(target_feature = "sse3")]
-                test_roundtrip_generic(n, fwd_sse3, inv_sse3);
-                #[cfg(target_feature = "sse2")]
-                test_roundtrip_generic(n, fwd_sse2, inv_sse2);
-            }
+            #[cfg(target_feature = "fma")]
+            test_roundtrip_generic(n, fwd_fma, inv_fma);
+            #[cfg(target_feature = "avx")]
+            test_roundtrip_generic(n, fwd_avx, inv_avx);
+            #[cfg(target_feature = "sse3")]
+            test_roundtrip_generic(n, fwd_sse3, inv_sse3);
+            #[cfg(target_feature = "sse2")]
+            test_roundtrip_generic(n, fwd_sse2, inv_sse2);
+
+            #[cfg(target_feature = "neon")]
+            test_roundtrip_generic(n, fwd_neon, inv_neon);
+
+            #[cfg(target_feature = "simd128")]
+            test_roundtrip_generic(n, fwd_simd128, inv_simd128);
         }
     }
 }
