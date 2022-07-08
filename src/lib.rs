@@ -52,6 +52,7 @@ mod wasm32;
 
 pub mod dif4;
 pub mod dif8;
+pub mod dif16;
 
 pub mod dit4;
 

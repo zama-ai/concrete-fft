@@ -284,7 +284,7 @@ fn main() -> Result<()> {
 
     write_to(
         &out_dir.join("dif16.rs"),
-        8,
+        16,
         gen_generic_dif_body,
         arch_module,
         &features,
@@ -292,7 +292,7 @@ fn main() -> Result<()> {
 
     write_to(
         &out_dir.join("dit16.rs"),
-        8,
+        16,
         gen_generic_dit_body,
         arch_module,
         &features,
