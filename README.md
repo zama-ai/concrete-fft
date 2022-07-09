@@ -1,6 +1,10 @@
 This crate computes the forward and inverse Fourier transform of a given array of some size
 that is a small-ish power of `2`.
 
+The algorithms were ported from the
+[OTFFT](http://wwwa.pikara.ne.jp/okojisan/otfft-en/) C++ library by Takuya
+OKAHISA.
+
 # Example
 
 ```rust
