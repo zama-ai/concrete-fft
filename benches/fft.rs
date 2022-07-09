@@ -166,11 +166,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 b.iter(|| binfft::dif8::inv(&mut dst, &w, stack.rb_mut()))
             });
 
+            c.bench_function(&format!("dit8-fwd-{}", n), |b| {
+                b.iter(|| binfft::dit8::fwd(&mut dst, &w, stack.rb_mut()))
+            });
+            c.bench_function(&format!("dit8-inv-{}", n), |b| {
+                b.iter(|| binfft::dit8::inv(&mut dst, &w, stack.rb_mut()))
+            });
+
             c.bench_function(&format!("dif16-fwd-{}", n), |b| {
-                b.iter(|| binfft::dif8::fwd(&mut dst, &w, stack.rb_mut()))
+                b.iter(|| binfft::dif16::fwd(&mut dst, &w, stack.rb_mut()))
             });
             c.bench_function(&format!("dif16-inv-{}", n), |b| {
-                b.iter(|| binfft::dif8::inv(&mut dst, &w, stack.rb_mut()))
+                b.iter(|| binfft::dif16::inv(&mut dst, &w, stack.rb_mut()))
             });
         }
 
