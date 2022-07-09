@@ -8,7 +8,7 @@ OKAHISA.
 # Example
 
 ```rust
-use binfft::{c64, init_twiddles, fwd, inv, fft_scratch};
+use binfft::{c64, dif4::{init_twiddles, fwd, inv}, fft_scratch};
 use dyn_stack::{uninit_mem_in_global, DynStack, ReborrowMut};
 use num_complex::ComplexFloat;
 
