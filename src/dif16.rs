@@ -1595,7 +1595,7 @@ pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
     assert_eq!(twiddles.len(), 2 * n);
 
     unsafe {
-        crate::twiddles::init_wt(8, n, twiddles.as_mut_ptr());
+        crate::twiddles::init_wt(16, n, twiddles.as_mut_ptr());
     }
 }
 
@@ -1681,7 +1681,6 @@ mod tests {
         fwd_fn: fn(&mut [c64], &[c64], DynStack),
         inv_fn: fn(&mut [c64], &[c64], DynStack),
     ) {
-        dbg!(n);
         let z = c64::new(0.0, 0.0);
 
         let mut arr_fwd = vec![z; n];
@@ -1719,8 +1718,6 @@ mod tests {
             inv.process(&mut arr_inv_expected);
 
             use num_complex::ComplexFloat;
-            dbg!(&arr_fwd);
-            dbg!(&arr_fwd_expected);
             for (actual, expected) in arr_fwd.iter().zip(&arr_fwd_expected) {
                 assert!((*actual - *expected).abs() < 1e-6);
             }
@@ -1791,7 +1788,7 @@ mod tests {
         }
     }
 
-    // #[test]
+    #[test]
     fn test_roundtrip() {
         for i in 0..crate::MAX_EXP {
             let n = 1usize << i;
