@@ -56,6 +56,7 @@ pub mod dif16;
 
 pub mod dit4;
 pub mod dit8;
+pub mod dit16;
 
 /// Complex type containing two `f64` values.
 #[allow(non_camel_case_types)]
