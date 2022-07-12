@@ -485,21 +485,21 @@ unsafe fn invcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, 
         let sp = s * p;
         let s16p = 16 * sp;
 
-        let w1p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 1, w, sp)));
-        let w2p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 2, w, sp)));
-        let w3p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 3, w, sp)));
-        let w4p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 4, w, sp)));
-        let w5p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 5, w, sp)));
-        let w6p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 6, w, sp)));
-        let w7p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 7, w, sp)));
-        let w8p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 8, w, sp)));
-        let w9p = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 9, w, sp)));
-        let wap = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 10, w, sp)));
-        let wbp = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 11, w, sp)));
-        let wcp = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 12, w, sp)));
-        let wdp = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 13, w, sp)));
-        let wep = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 14, w, sp)));
-        let wfp = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, 15, w, sp)));
+        let w1p = S::duppz3(&*twid_t(16, big_n, 1, w, sp));
+        let w2p = S::duppz3(&*twid_t(16, big_n, 2, w, sp));
+        let w3p = S::duppz3(&*twid_t(16, big_n, 3, w, sp));
+        let w4p = S::duppz3(&*twid_t(16, big_n, 4, w, sp));
+        let w5p = S::duppz3(&*twid_t(16, big_n, 5, w, sp));
+        let w6p = S::duppz3(&*twid_t(16, big_n, 6, w, sp));
+        let w7p = S::duppz3(&*twid_t(16, big_n, 7, w, sp));
+        let w8p = S::duppz3(&*twid_t(16, big_n, 8, w, sp));
+        let w9p = S::duppz3(&*twid_t(16, big_n, 9, w, sp));
+        let wap = S::duppz3(&*twid_t(16, big_n, 10, w, sp));
+        let wbp = S::duppz3(&*twid_t(16, big_n, 11, w, sp));
+        let wcp = S::duppz3(&*twid_t(16, big_n, 12, w, sp));
+        let wdp = S::duppz3(&*twid_t(16, big_n, 13, w, sp));
+        let wep = S::duppz3(&*twid_t(16, big_n, 14, w, sp));
+        let wfp = S::duppz3(&*twid_t(16, big_n, 15, w, sp));
 
         let mut q = 0;
         while q < s {
@@ -698,21 +698,21 @@ unsafe fn invcore_1<S: FftSimd16>(big_n: usize, s: usize, x: *mut c64, y: *mut c
         let x_p = x.add(p);
         let y_16p = y.add(16 * p);
 
-        let w1p = S::cnjpz2(S::getpz2(twid(16, big_n, 1, w, p)));
-        let w2p = S::cnjpz2(S::getpz2(twid(16, big_n, 2, w, p)));
-        let w3p = S::cnjpz2(S::getpz2(twid(16, big_n, 3, w, p)));
-        let w4p = S::cnjpz2(S::getpz2(twid(16, big_n, 4, w, p)));
-        let w5p = S::cnjpz2(S::getpz2(twid(16, big_n, 5, w, p)));
-        let w6p = S::cnjpz2(S::getpz2(twid(16, big_n, 6, w, p)));
-        let w7p = S::cnjpz2(S::getpz2(twid(16, big_n, 7, w, p)));
-        let w8p = S::cnjpz2(S::getpz2(twid(16, big_n, 8, w, p)));
-        let w9p = S::cnjpz2(S::getpz2(twid(16, big_n, 9, w, p)));
-        let wap = S::cnjpz2(S::getpz2(twid(16, big_n, 10, w, p)));
-        let wbp = S::cnjpz2(S::getpz2(twid(16, big_n, 11, w, p)));
-        let wcp = S::cnjpz2(S::getpz2(twid(16, big_n, 12, w, p)));
-        let wdp = S::cnjpz2(S::getpz2(twid(16, big_n, 13, w, p)));
-        let wep = S::cnjpz2(S::getpz2(twid(16, big_n, 14, w, p)));
-        let wfp = S::cnjpz2(S::getpz2(twid(16, big_n, 15, w, p)));
+        let w1p = S::getpz2(twid(16, big_n, 1, w, p));
+        let w2p = S::getpz2(twid(16, big_n, 2, w, p));
+        let w3p = S::getpz2(twid(16, big_n, 3, w, p));
+        let w4p = S::getpz2(twid(16, big_n, 4, w, p));
+        let w5p = S::getpz2(twid(16, big_n, 5, w, p));
+        let w6p = S::getpz2(twid(16, big_n, 6, w, p));
+        let w7p = S::getpz2(twid(16, big_n, 7, w, p));
+        let w8p = S::getpz2(twid(16, big_n, 8, w, p));
+        let w9p = S::getpz2(twid(16, big_n, 9, w, p));
+        let wap = S::getpz2(twid(16, big_n, 10, w, p));
+        let wbp = S::getpz2(twid(16, big_n, 11, w, p));
+        let wcp = S::getpz2(twid(16, big_n, 12, w, p));
+        let wdp = S::getpz2(twid(16, big_n, 13, w, p));
+        let wep = S::getpz2(twid(16, big_n, 14, w, p));
+        let wfp = S::getpz2(twid(16, big_n, 15, w, p));
 
         let ab_0 = S::getpz2(y_16p.add(0x00));
         let cd_0 = S::getpz2(y_16p.add(0x02));
@@ -1597,8 +1597,8 @@ include!(concat!(env!("OUT_DIR"), "/dit16.rs"));
 
 /// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
 /// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
-    crate::dif16::init_twiddles(n, twiddles);
+pub fn init_twiddles(forward: bool, n: usize, twiddles: &mut [c64]) {
+    crate::dif16::init_twiddles(forward, n, twiddles);
 }
 
 impl_main_fn!(fwd, &*FWD_FN_ARRAY);
@@ -1703,11 +1703,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_fwd, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_inv, &w, stack);
 
         #[cfg(not(miri))]
@@ -1747,11 +1748,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_roundtrip, &w, stack);
 
         for z in &mut arr_roundtrip {

@@ -482,7 +482,7 @@ unsafe fn invcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, 
         let s16p = 16 * sp;
 
         seq! {K in 0x1..0x10 {
-            let wp~K = S::cnjpz2(S::duppz3(&*twid_t(16, big_n, K, w, sp)));
+            let wp~K = S::duppz3(&*twid_t(16, big_n, K, w, sp));
         }}
 
         let mut q = 0;
@@ -777,21 +777,21 @@ unsafe fn invcore_1<S: FftSimd16>(big_n: usize, s: usize, x: *mut c64, y: *mut c
         let v8_a19m1a5d_pj_a3bm1a7f = S::v8xpz2(a19m1a5d_pj_a3bm1a7f);
         let hf_s19pjs5d_pv_s3bpjs7f = S::hfxpz2(s19pjs5d_pv_s3bpjs7f);
 
-        let w1p = S::cnjpz2(S::getpz2(twid(16, big_n, 1, w, p)));
-        let w2p = S::cnjpz2(S::getpz2(twid(16, big_n, 2, w, p)));
-        let w3p = S::cnjpz2(S::getpz2(twid(16, big_n, 3, w, p)));
-        let w4p = S::cnjpz2(S::getpz2(twid(16, big_n, 4, w, p)));
-        let w5p = S::cnjpz2(S::getpz2(twid(16, big_n, 5, w, p)));
-        let w6p = S::cnjpz2(S::getpz2(twid(16, big_n, 6, w, p)));
-        let w7p = S::cnjpz2(S::getpz2(twid(16, big_n, 7, w, p)));
-        let w8p = S::cnjpz2(S::getpz2(twid(16, big_n, 8, w, p)));
-        let w9p = S::cnjpz2(S::getpz2(twid(16, big_n, 9, w, p)));
-        let wap = S::cnjpz2(S::getpz2(twid(16, big_n, 10, w, p)));
-        let wbp = S::cnjpz2(S::getpz2(twid(16, big_n, 11, w, p)));
-        let wcp = S::cnjpz2(S::getpz2(twid(16, big_n, 12, w, p)));
-        let wdp = S::cnjpz2(S::getpz2(twid(16, big_n, 13, w, p)));
-        let wep = S::cnjpz2(S::getpz2(twid(16, big_n, 14, w, p)));
-        let wfp = S::cnjpz2(S::getpz2(twid(16, big_n, 15, w, p)));
+        let w1p = S::getpz2(twid(16, big_n, 1, w, p));
+        let w2p = S::getpz2(twid(16, big_n, 2, w, p));
+        let w3p = S::getpz2(twid(16, big_n, 3, w, p));
+        let w4p = S::getpz2(twid(16, big_n, 4, w, p));
+        let w5p = S::getpz2(twid(16, big_n, 5, w, p));
+        let w6p = S::getpz2(twid(16, big_n, 6, w, p));
+        let w7p = S::getpz2(twid(16, big_n, 7, w, p));
+        let w8p = S::getpz2(twid(16, big_n, 8, w, p));
+        let w9p = S::getpz2(twid(16, big_n, 9, w, p));
+        let wap = S::getpz2(twid(16, big_n, 10, w, p));
+        let wbp = S::getpz2(twid(16, big_n, 11, w, p));
+        let wcp = S::getpz2(twid(16, big_n, 12, w, p));
+        let wdp = S::getpz2(twid(16, big_n, 13, w, p));
+        let wep = S::getpz2(twid(16, big_n, 14, w, p));
+        let wfp = S::getpz2(twid(16, big_n, 15, w, p));
 
         let aa = S::addpz2(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
         let bb = S::mulpz2(
@@ -1588,14 +1588,14 @@ include!(concat!(env!("OUT_DIR"), "/dif16.rs"));
 
 /// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
 /// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
+pub fn init_twiddles(forward: bool, n: usize, twiddles: &mut [c64]) {
     assert!(n.is_power_of_two());
     let i = n.trailing_zeros() as usize;
     assert!(i < MAX_EXP);
     assert_eq!(twiddles.len(), 2 * n);
 
     unsafe {
-        crate::twiddles::init_wt(16, n, twiddles.as_mut_ptr());
+        crate::twiddles::init_wt(forward, 16, n, twiddles.as_mut_ptr());
     }
 }
 
@@ -1701,11 +1701,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_fwd, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_inv, &w, stack);
 
         #[cfg(not(miri))]
@@ -1745,11 +1746,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_roundtrip, &w, stack);
 
         for z in &mut arr_roundtrip {

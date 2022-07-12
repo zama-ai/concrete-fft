@@ -14,7 +14,6 @@
 //! let mut stack = DynStack::new(&mut mem);
 //!
 //! let mut twiddles = [c64::new(0.0, 0.0); 2 * N];
-//! init_twiddles(N, &mut twiddles);
 //!
 //! let data = [
 //!     c64::new(1.0, 0.0),
@@ -24,9 +23,11 @@
 //! ];
 //!
 //! let mut transformed_fwd = data;
+//! init_twiddles(true, N, &mut twiddles);
 //! fwd(&mut transformed_fwd, &twiddles, stack.rb_mut());
 //!
 //! let mut transformed_inv = transformed_fwd;
+//! init_twiddles(false, N, &mut twiddles);
 //! inv(&mut transformed_inv, &twiddles, stack.rb_mut());
 //!
 //! for (expected, actual) in transformed_inv.iter().map(|z| z / N as f64).zip(data) {
@@ -70,7 +71,7 @@ pub fn fft_scratch(n: usize) -> Result<StackReq, SizeOverflow> {
     StackReq::try_new_aligned::<c64>(n, 64)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FftAlgo {
     Dif4,
@@ -81,7 +82,7 @@ pub enum FftAlgo {
     Dit16,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     Forward,
     Inverse,
@@ -89,14 +90,14 @@ pub enum Direction {
 
 use std::time::{Duration, Instant};
 
-pub fn init_twiddles(algo: FftAlgo, n: usize, twiddles: &mut [c64]) {
+pub fn init_twiddles(algo: FftAlgo, direction: Direction, n: usize, twiddles: &mut [c64]) {
     match algo {
-        FftAlgo::Dif4 => dif4::init_twiddles(n, twiddles),
-        FftAlgo::Dit4 => dit4::init_twiddles(n, twiddles),
-        FftAlgo::Dif8 => dif8::init_twiddles(n, twiddles),
-        FftAlgo::Dit8 => dit8::init_twiddles(n, twiddles),
-        FftAlgo::Dif16 => dif16::init_twiddles(n, twiddles),
-        FftAlgo::Dit16 => dit16::init_twiddles(n, twiddles),
+        FftAlgo::Dif4 => dif4::init_twiddles(direction == Direction::Forward, n, twiddles),
+        FftAlgo::Dit4 => dit4::init_twiddles(direction == Direction::Forward, n, twiddles),
+        FftAlgo::Dif8 => dif8::init_twiddles(direction == Direction::Forward, n, twiddles),
+        FftAlgo::Dit8 => dit8::init_twiddles(direction == Direction::Forward, n, twiddles),
+        FftAlgo::Dif16 => dif16::init_twiddles(direction == Direction::Forward, n, twiddles),
+        FftAlgo::Dit16 => dit16::init_twiddles(direction == Direction::Forward, n, twiddles),
     }
 }
 

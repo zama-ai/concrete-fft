@@ -249,9 +249,9 @@ pub(crate) unsafe fn invcore_s<S: FftSimd16>(
     for p in 0..m {
         let sp = s * p;
         let s4p = 4 * sp;
-        let w1p = S::duppz5(&(*twid_t(4, big_n, 1, w, sp)).conj());
-        let w2p = S::duppz5(&(*twid_t(4, big_n, 2, w, sp)).conj());
-        let w3p = S::duppz5(&(*twid_t(4, big_n, 3, w, sp)).conj());
+        let w1p = S::duppz5(&*twid_t(4, big_n, 1, w, sp));
+        let w2p = S::duppz5(&*twid_t(4, big_n, 2, w, sp));
+        let w3p = S::duppz5(&*twid_t(4, big_n, 3, w, sp));
 
         let mut q = 0;
         loop {
@@ -306,9 +306,9 @@ pub(crate) unsafe fn invcore_1<S: FftSimd16>(
         let x_p = x.add(p);
         let y_4p = y.add(4 * p);
 
-        let w1p = S::cnjpz2(S::getpz2(twid(4, big_n, 1, w, p)));
-        let w2p = S::cnjpz2(S::getpz2(twid(4, big_n, 2, w, p)));
-        let w3p = S::cnjpz2(S::getpz2(twid(4, big_n, 3, w, p)));
+        let w1p = S::getpz2(twid(4, big_n, 1, w, p));
+        let w2p = S::getpz2(twid(4, big_n, 2, w, p));
+        let w3p = S::getpz2(twid(4, big_n, 3, w, p));
 
         let ab0 = S::getpz2(y_4p.add(0));
         let cd0 = S::getpz2(y_4p.add(2));
@@ -428,8 +428,8 @@ include!(concat!(env!("OUT_DIR"), "/dit4.rs"));
 
 /// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
 /// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(n: usize, twiddles: &mut [c64]) {
-    crate::dif4::init_twiddles(n, twiddles);
+pub fn init_twiddles(forward: bool, n: usize, twiddles: &mut [c64]) {
+    crate::dif4::init_twiddles(forward, n, twiddles);
 }
 impl_main_fn!(fwd, &*FWD_FN_ARRAY);
 impl_main_fn!(inv, &*INV_FN_ARRAY);
@@ -528,11 +528,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_fwd, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_inv, &w, stack);
 
         #[cfg(not(miri))]
@@ -572,11 +573,12 @@ mod tests {
 
         let mut w = vec![z; 2 * n];
 
-        init_twiddles(n, &mut w);
         let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
+        init_twiddles(true, n, &mut w);
         fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
+        init_twiddles(false, n, &mut w);
         inv_fn(&mut arr_roundtrip, &w, stack);
 
         for z in &mut arr_roundtrip {

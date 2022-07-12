@@ -10,7 +10,7 @@ pub unsafe fn twid_t(r: usize, big_n: usize, k: usize, w: *const c64, p: usize) 
     &*w.add(r * p + (big_n + k))
 }
 
-pub unsafe fn init_wt(r: usize, big_n: usize, w: *mut c64) {
+pub unsafe fn init_wt(forward: bool, r: usize, big_n: usize, w: *mut c64) {
     if big_n < r {
         return;
     }
@@ -26,7 +26,7 @@ pub unsafe fn init_wt(r: usize, big_n: usize, w: *mut c64) {
     for p in 0..nr {
         for k in 1..r {
             let (s, c) = (theta * (k * p) as f64).sin_cos();
-            let z = c64::new(c, s);
+            let z = c64::new(c, if forward { s } else { -s });
             *w.add(p + (k - 1) * nr) = z;
             *w.add(big_n + r * p + k) = z;
         }
