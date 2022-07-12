@@ -89,8 +89,10 @@ impl PlanInterleavedC64 {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    for n in [128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
-        let mut mem = dyn_stack::uninit_mem_in_global(
+    for n in [
+        1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
+    ] {
+        let mut mem = dyn_stack::GlobalMemBuffer::new(
             binfft::fft_scratch(n)
                 .unwrap()
                 .and(

@@ -5,12 +5,12 @@
 //!
 //! ```
 //! use binfft::{c64, dif4::{init_twiddles, fwd, inv}, fft_scratch};
-//! use dyn_stack::{uninit_mem_in_global, DynStack, ReborrowMut};
+//! use dyn_stack::{GlobalMemBuffer, DynStack, ReborrowMut};
 //! use num_complex::ComplexFloat;
 //!
 //! const N: usize = 4;
 //!
-//! let mut mem = uninit_mem_in_global(fft_scratch(N).unwrap());
+//! let mut mem = GlobalMemBuffer::new(fft_scratch(N).unwrap());
 //! let mut stack = DynStack::new(&mut mem);
 //!
 //! let mut twiddles = [c64::new(0.0, 0.0); 2 * N];
@@ -35,7 +35,7 @@
 //! }
 //! ```
 
-use dyn_stack::{uninit_mem_in_global, DynStack, ReborrowMut, SizeOverflow, StackReq};
+use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut, SizeOverflow, StackReq};
 use num_complex::Complex;
 
 mod fft_simd;
@@ -173,7 +173,7 @@ pub fn measure_fastest(
         .and(StackReq::new_aligned::<c64>(n, align)) // buffer
         .and(fft_scratch(n).unwrap()); // scratch
 
-    let mut mem = uninit_mem_in_global(stack_req);
+    let mut mem = GlobalMemBuffer::new(stack_req);
     let stack = DynStack::new(&mut mem);
 
     let f = |_| c64::default();

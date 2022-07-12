@@ -1702,7 +1702,7 @@ mod tests {
         let mut w = vec![z; 2 * n];
 
         init_twiddles(n, &mut w);
-        let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_scratch(n).unwrap());
+        let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
         fwd_fn(&mut arr_fwd, &w, stack.rb_mut());
@@ -1746,7 +1746,7 @@ mod tests {
         let mut w = vec![z; 2 * n];
 
         init_twiddles(n, &mut w);
-        let mut mem = dyn_stack::uninit_mem_in_global(crate::fft_scratch(n).unwrap());
+        let mut mem = dyn_stack::GlobalMemBuffer::new(crate::fft_scratch(n).unwrap());
         let mut stack = DynStack::new(&mut mem);
 
         fwd_fn(&mut arr_roundtrip, &w, stack.rb_mut());
