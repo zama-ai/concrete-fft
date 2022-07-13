@@ -51,13 +51,14 @@ mod aarch64;
 #[cfg(target_arch = "wasm32")]
 mod wasm32;
 
-pub mod dif16;
-pub mod dif4;
-pub mod dif8;
+mod dif16;
+mod dif4;
+mod dif8;
 
-pub mod dit16;
-pub mod dit4;
-pub mod dit8;
+mod boilerplate;
+mod dit16;
+mod dit4;
+mod dit8;
 
 /// Complex type containing two `f64` values.
 #[allow(non_camel_case_types)]
@@ -67,7 +68,7 @@ pub type c64 = Complex<f64>;
 pub const MAX_EXP: usize = 17;
 
 /// Scratch memory requirements for calling fft functions.
-pub fn fft_scratch(n: usize) -> Result<StackReq, SizeOverflow> {
+fn fft_scratch(n: usize) -> Result<StackReq, SizeOverflow> {
     StackReq::try_new_aligned::<c64>(n, 64)
 }
 
@@ -83,6 +84,13 @@ pub enum FftAlgo {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Method {
+    UserProvided(FftAlgo),
+    Measure(Duration),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     Forward,
     Inverse,
@@ -90,7 +98,7 @@ pub enum Direction {
 
 use std::time::{Duration, Instant};
 
-pub fn init_twiddles(algo: FftAlgo, direction: Direction, n: usize, twiddles: &mut [c64]) {
+fn init_twiddles(algo: FftAlgo, direction: Direction, n: usize, twiddles: &mut [c64]) {
     match algo {
         FftAlgo::Dif4 => dif4::init_twiddles(direction == Direction::Forward, n, twiddles),
         FftAlgo::Dit4 => dit4::init_twiddles(direction == Direction::Forward, n, twiddles),
@@ -101,20 +109,14 @@ pub fn init_twiddles(algo: FftAlgo, direction: Direction, n: usize, twiddles: &m
     }
 }
 
-pub fn fft(
-    algo: FftAlgo,
-    direction: Direction,
-    data: &mut [c64],
-    twiddles: &[c64],
-    stack: DynStack,
-) {
+fn fft(algo: FftAlgo, direction: Direction, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
     match direction {
         Direction::Forward => fwd(algo, data, twiddles, stack),
         Direction::Inverse => inv(algo, data, twiddles, stack),
     }
 }
 
-pub fn fwd(algo: FftAlgo, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
+fn fwd(algo: FftAlgo, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
     match algo {
         FftAlgo::Dif4 => dif4::fwd(data, twiddles, stack),
         FftAlgo::Dit4 => dit4::fwd(data, twiddles, stack),
@@ -125,7 +127,7 @@ pub fn fwd(algo: FftAlgo, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
     }
 }
 
-pub fn inv(algo: FftAlgo, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
+fn inv(algo: FftAlgo, data: &mut [c64], twiddles: &[c64], stack: DynStack) {
     match algo {
         FftAlgo::Dif4 => dif4::inv(data, twiddles, stack),
         FftAlgo::Dit4 => dit4::inv(data, twiddles, stack),
@@ -157,7 +159,7 @@ fn duration_div_f64(duration: Duration, n: f64) -> Duration {
     Duration::from_secs_f64(duration.as_secs_f64() / n as f64)
 }
 
-pub fn measure_fastest(
+fn measure_fastest(
     min_bench_duration_per_algo: Duration,
     n: usize,
     direction: Direction,
@@ -238,27 +240,119 @@ pub fn measure_fastest(
     discriminant_to_algo(best_index)
 }
 
-macro_rules! impl_main_fn {
-    ($(#[$attr: meta])? $name: ident, $array_expr: expr) => {
-        $(#[$attr])*
-        pub fn $name(data: &mut [c64], twiddles: &[c64], stack: DynStack) {
-            let n = data.len();
-            let i = n.trailing_zeros() as usize;
-
-            assert!(n.is_power_of_two());
-            assert!(i < MAX_EXP);
-            assert_eq!(twiddles.len(), 2 * n);
-
-            let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, 64);
-            let scratch = scratch.as_mut_ptr();
-            let data = data.as_mut_ptr();
-            let w = twiddles.as_ptr();
-
-            unsafe {
-                ($array_expr)[i](data, scratch as *mut c64, w);
-            }
-        }
-    };
+struct AlignedBox {
+    ptr: *const c64,
+    len: usize,
 }
 
-pub(crate) use impl_main_fn;
+impl AlignedBox {
+    fn new_zeroed(len: usize) -> Self {
+        let buf = GlobalMemBuffer::new(StackReq::new_aligned::<c64>(len, 64));
+        let (ptr, _, _) = buf.into_raw_parts();
+        let ptr = ptr as *mut c64;
+        for i in 0..len {
+            unsafe { ptr.add(i).write(c64::default()) };
+        }
+        Self { ptr, len }
+    }
+}
+
+impl Drop for AlignedBox {
+    fn drop(&mut self) {
+        unsafe {
+            std::mem::drop(GlobalMemBuffer::from_raw_parts(self.ptr as _, self.len, 64));
+        }
+    }
+}
+
+impl Clone for AlignedBox {
+    fn clone(&self) -> Self {
+        let len = self.len;
+        let src = self.ptr;
+
+        let buf = GlobalMemBuffer::new(StackReq::new_aligned::<c64>(len, 64));
+        let (ptr, len, _) = buf.into_raw_parts();
+        let dst = ptr as *mut c64;
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+        Self { ptr: dst, len }
+    }
+}
+
+impl std::ops::Deref for AlignedBox {
+    type Target = [c64];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+impl std::ops::DerefMut for AlignedBox {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut c64, self.len) }
+    }
+}
+
+#[derive(Clone)]
+pub struct Plan {
+    fn_ptr: unsafe fn(*mut c64, *mut c64, *const c64),
+    twiddles: AlignedBox,
+    algo: FftAlgo,
+}
+
+impl std::fmt::Debug for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Plan")
+            .field("algo", &self.algo)
+            .field("length", &self.len())
+            .finish()
+    }
+}
+
+impl Plan {
+    pub fn new(n: usize, method: Method, direction: Direction) -> Self {
+        assert!(n.is_power_of_two());
+        assert!((n.trailing_zeros() as usize) < MAX_EXP);
+        let algo = match method {
+            Method::UserProvided(algo) => algo,
+            Method::Measure(duration) => measure_fastest(duration, n, direction),
+        };
+
+        let fn_ptr = match algo {
+            FftAlgo::Dif4 => dif4::get_fn_ptr(direction, n),
+            FftAlgo::Dit4 => dit4::get_fn_ptr(direction, n),
+            FftAlgo::Dif8 => dif8::get_fn_ptr(direction, n),
+            FftAlgo::Dit8 => dit8::get_fn_ptr(direction, n),
+            FftAlgo::Dif16 => dif16::get_fn_ptr(direction, n),
+            FftAlgo::Dit16 => dit16::get_fn_ptr(direction, n),
+        };
+
+        let mut twiddles = AlignedBox::new_zeroed(2 * n);
+        init_twiddles(algo, direction, n, &mut *twiddles);
+        Self {
+            fn_ptr,
+            twiddles,
+            algo,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.twiddles.len() / 2
+    }
+
+    pub fn algo(&self) -> FftAlgo {
+        self.algo
+    }
+
+    pub fn fft_scratch(&self) -> Result<StackReq, SizeOverflow> {
+        fft_scratch(self.len())
+    }
+
+    pub fn fft(&self, buf: &mut [c64], stack: DynStack) {
+        let n = self.len();
+        assert_eq!(n, buf.len());
+        let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, 64);
+        let buf = buf.as_mut_ptr();
+        let scratch = scratch.as_mut_ptr();
+        unsafe { (self.fn_ptr)(buf, scratch as *mut c64, self.twiddles.ptr) }
+    }
+}

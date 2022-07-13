@@ -89,12 +89,9 @@ impl PlanInterleavedC64 {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    for n in [
-        1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
-    ] {
+    for n in [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
         let mut mem = dyn_stack::GlobalMemBuffer::new(
-            binfft::fft_scratch(n)
-                .unwrap()
+            StackReq::new_aligned::<c64>(n, 64) // scratch
                 .and(
                     StackReq::new_aligned::<c64>(2 * n, 64).or(StackReq::new_aligned::<c64>(n, 64)), // src | twiddles
                 )
@@ -114,14 +111,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
             let inv_fftw = PlanInterleavedC64::new(n, Sign::Backward);
 
-            let fwd_binfft = binfft::measure_fastest(
-                std::time::Duration::from_millis(100),
+            let bench_duration = std::time::Duration::from_millis(100);
+            let fwd_binfft = binfft::Plan::new(
                 n,
+                binfft::Method::Measure(bench_duration),
                 binfft::Direction::Forward,
             );
-            let inv_binfft = binfft::measure_fastest(
-                std::time::Duration::from_millis(100),
+            let inv_binfft = binfft::Plan::new(
                 n,
+                binfft::Method::Measure(bench_duration),
                 binfft::Direction::Inverse,
             );
 
@@ -147,10 +145,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             }
             {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-                let (w, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(2 * n, 64, |_| z);
 
                 c.bench_function(&format!("binfft-fwd-{}", n), |b| {
-                    b.iter(|| binfft::fwd(fwd_binfft, &mut dst, &w, stack.rb_mut()))
+                    b.iter(|| fwd_binfft.fft(&mut *dst, stack.rb_mut()))
                 });
             }
 
@@ -174,10 +171,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             }
             {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-                let (w, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(2 * n, 64, |_| z);
 
                 c.bench_function(&format!("binfft-inv-{}", n), |b| {
-                    b.iter(|| binfft::inv(inv_binfft, &mut dst, &w, stack.rb_mut()))
+                    b.iter(|| inv_binfft.fft(&mut *dst, stack.rb_mut()))
                 });
             }
         }
