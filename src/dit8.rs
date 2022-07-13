@@ -31,57 +31,57 @@ unsafe fn fwdcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, 
         let sp = s * p;
         let s8p = 8 * sp;
 
-        let w1p = S::duppz5(&*twid_t(8, big_n, 1, w, sp));
-        let w2p = S::duppz5(&*twid_t(8, big_n, 2, w, sp));
-        let w3p = S::duppz5(&*twid_t(8, big_n, 3, w, sp));
-        let w4p = S::duppz5(&*twid_t(8, big_n, 4, w, sp));
-        let w5p = S::duppz5(&*twid_t(8, big_n, 5, w, sp));
-        let w6p = S::duppz5(&*twid_t(8, big_n, 6, w, sp));
-        let w7p = S::duppz5(&*twid_t(8, big_n, 7, w, sp));
+        let w1p = S::duppz3(&*twid_t(8, big_n, 1, w, sp));
+        let w2p = S::duppz3(&*twid_t(8, big_n, 2, w, sp));
+        let w3p = S::duppz3(&*twid_t(8, big_n, 3, w, sp));
+        let w4p = S::duppz3(&*twid_t(8, big_n, 4, w, sp));
+        let w5p = S::duppz3(&*twid_t(8, big_n, 5, w, sp));
+        let w6p = S::duppz3(&*twid_t(8, big_n, 6, w, sp));
+        let w7p = S::duppz3(&*twid_t(8, big_n, 7, w, sp));
 
         let mut q = 0;
         while q < s {
             let xq_sp = x.add(q + sp);
             let yq_s8p = y.add(q + s8p);
 
-            let y0 = S::getpz4(yq_s8p.add(0));
-            let y1 = S::mulpz4(w1p, S::getpz4(yq_s8p.add(s)));
-            let y2 = S::mulpz4(w2p, S::getpz4(yq_s8p.add(s * 2)));
-            let y3 = S::mulpz4(w3p, S::getpz4(yq_s8p.add(s * 3)));
-            let y4 = S::mulpz4(w4p, S::getpz4(yq_s8p.add(s * 4)));
-            let y5 = S::mulpz4(w5p, S::getpz4(yq_s8p.add(s * 5)));
-            let y6 = S::mulpz4(w6p, S::getpz4(yq_s8p.add(s * 6)));
-            let y7 = S::mulpz4(w7p, S::getpz4(yq_s8p.add(s * 7)));
-            let a04 = S::addpz4(y0, y4);
-            let s04 = S::subpz4(y0, y4);
-            let a26 = S::addpz4(y2, y6);
-            let js26 = S::jxpz4(S::subpz4(y2, y6));
-            let a15 = S::addpz4(y1, y5);
-            let s15 = S::subpz4(y1, y5);
-            let a37 = S::addpz4(y3, y7);
-            let js37 = S::jxpz4(S::subpz4(y3, y7));
+            let y0 = S::getpz2(yq_s8p.add(0));
+            let y1 = S::mulpz2(w1p, S::getpz2(yq_s8p.add(s)));
+            let y2 = S::mulpz2(w2p, S::getpz2(yq_s8p.add(s * 2)));
+            let y3 = S::mulpz2(w3p, S::getpz2(yq_s8p.add(s * 3)));
+            let y4 = S::mulpz2(w4p, S::getpz2(yq_s8p.add(s * 4)));
+            let y5 = S::mulpz2(w5p, S::getpz2(yq_s8p.add(s * 5)));
+            let y6 = S::mulpz2(w6p, S::getpz2(yq_s8p.add(s * 6)));
+            let y7 = S::mulpz2(w7p, S::getpz2(yq_s8p.add(s * 7)));
+            let a04 = S::addpz2(y0, y4);
+            let s04 = S::subpz2(y0, y4);
+            let a26 = S::addpz2(y2, y6);
+            let js26 = S::jxpz2(S::subpz2(y2, y6));
+            let a15 = S::addpz2(y1, y5);
+            let s15 = S::subpz2(y1, y5);
+            let a37 = S::addpz2(y3, y7);
+            let js37 = S::jxpz2(S::subpz2(y3, y7));
 
-            let a04_p1_a26 = S::addpz4(a04, a26);
-            let a15_p1_a37 = S::addpz4(a15, a37);
-            S::setpz4(xq_sp.add(big_n0), S::addpz4(a04_p1_a26, a15_p1_a37));
-            S::setpz4(xq_sp.add(big_n4), S::subpz4(a04_p1_a26, a15_p1_a37));
+            let a04_p1_a26 = S::addpz2(a04, a26);
+            let a15_p1_a37 = S::addpz2(a15, a37);
+            S::setpz2(xq_sp.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
+            S::setpz2(xq_sp.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
 
-            let s04_mj_s26 = S::subpz4(s04, js26);
-            let w8_s15_mj_s37 = S::w8xpz4(S::subpz4(s15, js37));
-            S::setpz4(xq_sp.add(big_n1), S::addpz4(s04_mj_s26, w8_s15_mj_s37));
-            S::setpz4(xq_sp.add(big_n5), S::subpz4(s04_mj_s26, w8_s15_mj_s37));
+            let s04_mj_s26 = S::subpz2(s04, js26);
+            let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
+            S::setpz2(xq_sp.add(big_n1), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
+            S::setpz2(xq_sp.add(big_n5), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
 
-            let a04_m1_a26 = S::subpz4(a04, a26);
-            let j_a15_m1_a37 = S::jxpz4(S::subpz4(a15, a37));
-            S::setpz4(xq_sp.add(big_n2), S::subpz4(a04_m1_a26, j_a15_m1_a37));
-            S::setpz4(xq_sp.add(big_n6), S::addpz4(a04_m1_a26, j_a15_m1_a37));
+            let a04_m1_a26 = S::subpz2(a04, a26);
+            let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
+            S::setpz2(xq_sp.add(big_n2), S::subpz2(a04_m1_a26, j_a15_m1_a37));
+            S::setpz2(xq_sp.add(big_n6), S::addpz2(a04_m1_a26, j_a15_m1_a37));
 
-            let s04_pj_s26 = S::addpz4(s04, js26);
-            let v8_s15_pj_s37 = S::v8xpz4(S::addpz4(s15, js37));
-            S::setpz4(xq_sp.add(big_n3), S::subpz4(s04_pj_s26, v8_s15_pj_s37));
-            S::setpz4(xq_sp.add(big_n7), S::addpz4(s04_pj_s26, v8_s15_pj_s37));
+            let s04_pj_s26 = S::addpz2(s04, js26);
+            let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
+            S::setpz2(xq_sp.add(big_n3), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
+            S::setpz2(xq_sp.add(big_n7), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
 
-            q += 4;
+            q += 2;
         }
     }
 }
@@ -180,57 +180,57 @@ unsafe fn invcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, 
         let sp = s * p;
         let s8p = 8 * sp;
 
-        let w1p = S::duppz5(&*twid_t(8, big_n, 1, w, sp));
-        let w2p = S::duppz5(&*twid_t(8, big_n, 2, w, sp));
-        let w3p = S::duppz5(&*twid_t(8, big_n, 3, w, sp));
-        let w4p = S::duppz5(&*twid_t(8, big_n, 4, w, sp));
-        let w5p = S::duppz5(&*twid_t(8, big_n, 5, w, sp));
-        let w6p = S::duppz5(&*twid_t(8, big_n, 6, w, sp));
-        let w7p = S::duppz5(&*twid_t(8, big_n, 7, w, sp));
+        let w1p = S::duppz3(&*twid_t(8, big_n, 1, w, sp));
+        let w2p = S::duppz3(&*twid_t(8, big_n, 2, w, sp));
+        let w3p = S::duppz3(&*twid_t(8, big_n, 3, w, sp));
+        let w4p = S::duppz3(&*twid_t(8, big_n, 4, w, sp));
+        let w5p = S::duppz3(&*twid_t(8, big_n, 5, w, sp));
+        let w6p = S::duppz3(&*twid_t(8, big_n, 6, w, sp));
+        let w7p = S::duppz3(&*twid_t(8, big_n, 7, w, sp));
 
         let mut q = 0;
         while q < s {
             let xq_sp = x.add(q + sp);
             let yq_s8p = y.add(q + s8p);
 
-            let y0 = S::getpz4(yq_s8p.add(0));
-            let y1 = S::mulpz4(w1p, S::getpz4(yq_s8p.add(s)));
-            let y2 = S::mulpz4(w2p, S::getpz4(yq_s8p.add(s * 2)));
-            let y3 = S::mulpz4(w3p, S::getpz4(yq_s8p.add(s * 3)));
-            let y4 = S::mulpz4(w4p, S::getpz4(yq_s8p.add(s * 4)));
-            let y5 = S::mulpz4(w5p, S::getpz4(yq_s8p.add(s * 5)));
-            let y6 = S::mulpz4(w6p, S::getpz4(yq_s8p.add(s * 6)));
-            let y7 = S::mulpz4(w7p, S::getpz4(yq_s8p.add(s * 7)));
-            let a04 = S::addpz4(y0, y4);
-            let s04 = S::subpz4(y0, y4);
-            let a26 = S::addpz4(y2, y6);
-            let js26 = S::jxpz4(S::subpz4(y2, y6));
-            let a15 = S::addpz4(y1, y5);
-            let s15 = S::subpz4(y1, y5);
-            let a37 = S::addpz4(y3, y7);
-            let js37 = S::jxpz4(S::subpz4(y3, y7));
+            let y0 = S::getpz2(yq_s8p.add(0));
+            let y1 = S::mulpz2(w1p, S::getpz2(yq_s8p.add(s)));
+            let y2 = S::mulpz2(w2p, S::getpz2(yq_s8p.add(s * 2)));
+            let y3 = S::mulpz2(w3p, S::getpz2(yq_s8p.add(s * 3)));
+            let y4 = S::mulpz2(w4p, S::getpz2(yq_s8p.add(s * 4)));
+            let y5 = S::mulpz2(w5p, S::getpz2(yq_s8p.add(s * 5)));
+            let y6 = S::mulpz2(w6p, S::getpz2(yq_s8p.add(s * 6)));
+            let y7 = S::mulpz2(w7p, S::getpz2(yq_s8p.add(s * 7)));
+            let a04 = S::addpz2(y0, y4);
+            let s04 = S::subpz2(y0, y4);
+            let a26 = S::addpz2(y2, y6);
+            let js26 = S::jxpz2(S::subpz2(y2, y6));
+            let a15 = S::addpz2(y1, y5);
+            let s15 = S::subpz2(y1, y5);
+            let a37 = S::addpz2(y3, y7);
+            let js37 = S::jxpz2(S::subpz2(y3, y7));
 
-            let a04_p1_a26 = S::addpz4(a04, a26);
-            let a15_p1_a37 = S::addpz4(a15, a37);
-            S::setpz4(xq_sp.add(big_n0), S::addpz4(a04_p1_a26, a15_p1_a37));
-            S::setpz4(xq_sp.add(big_n4), S::subpz4(a04_p1_a26, a15_p1_a37));
+            let a04_p1_a26 = S::addpz2(a04, a26);
+            let a15_p1_a37 = S::addpz2(a15, a37);
+            S::setpz2(xq_sp.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
+            S::setpz2(xq_sp.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
 
-            let s04_pj_s26 = S::addpz4(s04, js26);
-            let v8_s15_pj_s37 = S::v8xpz4(S::addpz4(s15, js37));
-            S::setpz4(xq_sp.add(big_n1), S::addpz4(s04_pj_s26, v8_s15_pj_s37));
-            S::setpz4(xq_sp.add(big_n5), S::subpz4(s04_pj_s26, v8_s15_pj_s37));
+            let s04_pj_s26 = S::addpz2(s04, js26);
+            let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
+            S::setpz2(xq_sp.add(big_n1), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
+            S::setpz2(xq_sp.add(big_n5), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
 
-            let a04_m1_a26 = S::subpz4(a04, a26);
-            let j_a15_m1_a37 = S::jxpz4(S::subpz4(a15, a37));
-            S::setpz4(xq_sp.add(big_n2), S::addpz4(a04_m1_a26, j_a15_m1_a37));
-            S::setpz4(xq_sp.add(big_n6), S::subpz4(a04_m1_a26, j_a15_m1_a37));
+            let a04_m1_a26 = S::subpz2(a04, a26);
+            let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
+            S::setpz2(xq_sp.add(big_n2), S::addpz2(a04_m1_a26, j_a15_m1_a37));
+            S::setpz2(xq_sp.add(big_n6), S::subpz2(a04_m1_a26, j_a15_m1_a37));
 
-            let s04_mj_s26 = S::subpz4(s04, js26);
-            let w8_s15_mj_s37 = S::w8xpz4(S::subpz4(s15, js37));
-            S::setpz4(xq_sp.add(big_n3), S::subpz4(s04_mj_s26, w8_s15_mj_s37));
-            S::setpz4(xq_sp.add(big_n7), S::addpz4(s04_mj_s26, w8_s15_mj_s37));
+            let s04_mj_s26 = S::subpz2(s04, js26);
+            let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
+            S::setpz2(xq_sp.add(big_n3), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
+            S::setpz2(xq_sp.add(big_n7), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
 
-            q += 4;
+            q += 2;
         }
     }
 }
