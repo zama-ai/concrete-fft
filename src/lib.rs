@@ -199,7 +199,6 @@ fn measure_fastest(min_bench_duration_per_algo: Duration, n: usize) -> FftAlgo {
             duration_div_f64(duration, n_runs as f64)
         };
     }
-    dbg!(&avg_durations);
 
     let best_time = avg_durations.iter().min().unwrap();
     let best_index = avg_durations
