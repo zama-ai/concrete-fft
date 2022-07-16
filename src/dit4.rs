@@ -1,17 +1,16 @@
-use crate::fft_simd::FftSimd16;
-use crate::twiddles::{twid, twid_t};
 use crate::c64;
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
 
-// forward butterfly
 #[inline(always)]
-pub(crate) unsafe fn fwdcore_s<S: FftSimd16>(
+unsafe fn core_<I: FftSimd64>(
+    fwd: bool,
     n: usize,
     s: usize,
     x: *mut c64,
     y: *mut c64,
     w: *const c64,
 ) {
-    debug_assert_ne!(s, 1);
+    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
 
     let m = n / 4;
     let big_n = n * s;
@@ -23,410 +22,357 @@ pub(crate) unsafe fn fwdcore_s<S: FftSimd16>(
     for p in 0..m {
         let sp = s * p;
         let s4p = 4 * sp;
-        let w1p = S::duppz5(&*twid_t(4, big_n, 1, w, sp));
-        let w2p = S::duppz5(&*twid_t(4, big_n, 2, w, sp));
-        let w3p = S::duppz5(&*twid_t(4, big_n, 3, w, sp));
+        let w1p = I::splat(twid_t(4, big_n, 1, w, sp));
+        let w2p = I::splat(twid_t(4, big_n, 2, w, sp));
+        let w3p = I::splat(twid_t(4, big_n, 3, w, sp));
 
         let mut q = 0;
-        loop {
-            if q >= s {
-                break;
-            }
-
+        while q < s {
             let xq_sp = x.add(q + sp);
             let yq_s4p = y.add(q + s4p);
 
-            let a = S::getpz4(yq_s4p.add(0));
-            let b = S::mulpz4(w1p, S::getpz4(yq_s4p.add(s)));
-            let c = S::mulpz4(w2p, S::getpz4(yq_s4p.add(s * 2)));
-            let d = S::mulpz4(w3p, S::getpz4(yq_s4p.add(s * 3)));
+            let a = I::load(yq_s4p.add(0));
+            let b = I::mul(w1p, I::load(yq_s4p.add(s)));
+            let c = I::mul(w2p, I::load(yq_s4p.add(s * 2)));
+            let d = I::mul(w3p, I::load(yq_s4p.add(s * 3)));
 
-            let apc = S::addpz4(a, c);
-            let amc = S::subpz4(a, c);
+            let apc = I::add(a, c);
+            let amc = I::sub(a, c);
 
-            let bpd = S::addpz4(b, d);
-            let jbmd = S::jxpz4(S::subpz4(b, d));
+            let bpd = I::add(b, d);
+            let jbmd = I::xpj(fwd, I::sub(b, d));
 
-            S::setpz4(xq_sp.add(big_n0), S::addpz4(apc, bpd));
-            S::setpz4(xq_sp.add(big_n1), S::subpz4(amc, jbmd));
-            S::setpz4(xq_sp.add(big_n2), S::subpz4(apc, bpd));
-            S::setpz4(xq_sp.add(big_n3), S::addpz4(amc, jbmd));
+            I::store(xq_sp.add(big_n0), I::add(apc, bpd));
+            I::store(xq_sp.add(big_n1), I::sub(amc, jbmd));
+            I::store(xq_sp.add(big_n2), I::sub(apc, bpd));
+            I::store(xq_sp.add(big_n3), I::add(amc, jbmd));
 
-            q += 4;
+            q += I::COMPLEX_PER_REG;
         }
     }
 }
 
 #[inline(always)]
-pub(crate) unsafe fn fwdcore_1<S: FftSimd16>(
-    big_n: usize,
+unsafe fn core_x2<I: FftSimd64X2>(
+    fwd: bool,
+    n: usize,
     s: usize,
     x: *mut c64,
     y: *mut c64,
     w: *const c64,
 ) {
     debug_assert_eq!(s, 1);
+
+    let big_n = n;
     let big_n0 = 0;
     let big_n1 = big_n / 4;
     let big_n2 = big_n1 * 2;
     let big_n3 = big_n1 * 3;
 
     let mut p = 0;
-    loop {
-        if p >= big_n1 {
-            break;
-        }
-
+    while p < big_n1 {
         let x_p = x.add(p);
         let y_4p = y.add(4 * p);
 
-        let w1p = S::getpz2(twid(4, big_n, 1, w, p));
-        let w2p = S::getpz2(twid(4, big_n, 2, w, p));
-        let w3p = S::getpz2(twid(4, big_n, 3, w, p));
+        let w1p = I::load(twid(4, big_n, 1, w, p));
+        let w2p = I::load(twid(4, big_n, 2, w, p));
+        let w3p = I::load(twid(4, big_n, 3, w, p));
 
-        let ab0 = S::getpz2(y_4p.add(0));
-        let cd0 = S::getpz2(y_4p.add(2));
-        let ab1 = S::getpz2(y_4p.add(4));
-        let cd1 = S::getpz2(y_4p.add(6));
+        let ab0 = I::load(y_4p.add(0));
+        let cd0 = I::load(y_4p.add(2));
+        let ab1 = I::load(y_4p.add(4));
+        let cd1 = I::load(y_4p.add(6));
 
-        let a = S::catlo(ab0, ab1);
-        let b = S::mulpz2(w1p, S::cathi(ab0, ab1));
-        let c = S::mulpz2(w2p, S::catlo(cd0, cd1));
-        let d = S::mulpz2(w3p, S::cathi(cd0, cd1));
+        let a = I::catlo(ab0, ab1);
+        let b = I::mul(w1p, I::cathi(ab0, ab1));
+        let c = I::mul(w2p, I::catlo(cd0, cd1));
+        let d = I::mul(w3p, I::cathi(cd0, cd1));
 
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
+        let apc = I::add(a, c);
+        let amc = I::sub(a, c);
+        let bpd = I::add(b, d);
+        let jbmd = I::xpj(fwd, I::sub(b, d));
 
-        S::setpz2(x_p.add(big_n0), S::addpz2(apc, bpd));
-        S::setpz2(x_p.add(big_n1), S::subpz2(amc, jbmd));
-        S::setpz2(x_p.add(big_n2), S::subpz2(apc, bpd));
-        S::setpz2(x_p.add(big_n3), S::addpz2(amc, jbmd));
+        I::store(x_p.add(big_n0), I::add(apc, bpd));
+        I::store(x_p.add(big_n1), I::sub(amc, jbmd));
+        I::store(x_p.add(big_n2), I::sub(apc, bpd));
+        I::store(x_p.add(big_n3), I::add(amc, jbmd));
 
         p += 2;
     }
 }
 
 #[inline(always)]
-pub(crate) unsafe fn fwdend_4_s<S: FftSimd16>(
+pub unsafe fn end_4<I: FftSimd64>(
+    fwd: bool,
     n: usize,
     s: usize,
-    eo: bool,
     x: *mut c64,
     y: *mut c64,
+    eo: bool,
 ) {
     debug_assert_eq!(n, 4);
-    debug_assert_ne!(s, 1);
+    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
     let z = if eo { y } else { x };
 
     let mut q = 0;
-    loop {
-        if q >= s {
-            break;
-        }
-
+    while q < s {
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let a = S::getpz2(zq.add(0));
-        let b = S::getpz2(zq.add(s));
-        let c = S::getpz2(zq.add(s * 2));
-        let d = S::getpz2(zq.add(s * 3));
+        let a = I::load(zq.add(0));
+        let b = I::load(zq.add(s));
+        let c = I::load(zq.add(s * 2));
+        let d = I::load(zq.add(s * 3));
 
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
+        let apc = I::add(a, c);
+        let amc = I::sub(a, c);
+        let bpd = I::add(b, d);
+        let jbmd = I::xpj(fwd, I::sub(b, d));
 
-        S::setpz2(xq.add(0), S::addpz2(apc, bpd));
-        S::setpz2(xq.add(s), S::subpz2(amc, jbmd));
-        S::setpz2(xq.add(s * 2), S::subpz2(apc, bpd));
-        S::setpz2(xq.add(s * 3), S::addpz2(amc, jbmd));
+        I::store(xq.add(0), I::add(apc, bpd));
+        I::store(xq.add(s), I::sub(amc, jbmd));
+        I::store(xq.add(s * 2), I::sub(apc, bpd));
+        I::store(xq.add(s * 3), I::add(amc, jbmd));
 
-        q += 2;
+        q += I::COMPLEX_PER_REG;
     }
 }
 
 #[inline(always)]
-pub(crate) unsafe fn fwdend_4_1<S: FftSimd16>(
+pub unsafe fn end_2<I: FftSimd64>(
+    _fwd: bool,
     n: usize,
     s: usize,
-    eo: bool,
     x: *mut c64,
     y: *mut c64,
-) {
-    debug_assert_eq!(n, 4);
-    debug_assert_eq!(s, 1);
-    let z = if eo { y } else { x };
-
-    let a = S::getpz(&*z.add(0));
-    let b = S::getpz(&*z.add(1));
-    let c = S::getpz(&*z.add(2));
-    let d = S::getpz(&*z.add(3));
-
-    let apc = S::addpz(a, c);
-    let amc = S::subpz(a, c);
-    let bpd = S::addpz(b, d);
-    let jbmd = S::jxpz(S::subpz(b, d));
-
-    S::setpz(x.add(0), S::addpz(apc, bpd));
-    S::setpz(x.add(1), S::subpz(amc, jbmd));
-    S::setpz(x.add(2), S::subpz(apc, bpd));
-    S::setpz(x.add(3), S::addpz(amc, jbmd));
-}
-
-#[inline(always)]
-pub(crate) unsafe fn fwdend_2_s<S: FftSimd16>(
-    n: usize,
-    s: usize,
     eo: bool,
-    x: *mut c64,
-    y: *mut c64,
 ) {
     debug_assert_eq!(n, 2);
-    debug_assert_ne!(s, 1);
+    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
     let z = if eo { y } else { x };
 
     let mut q = 0;
-    loop {
-        if q >= s {
-            break;
-        }
-
+    while q < s {
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let a = S::getpz2(zq.add(0));
-        let b = S::getpz2(zq.add(s));
+        let a = I::load(zq.add(0));
+        let b = I::load(zq.add(s));
 
-        S::setpz2(xq.add(0), S::addpz2(a, b));
-        S::setpz2(xq.add(s), S::subpz2(a, b));
+        I::store(xq.add(0), I::add(a, b));
+        I::store(xq.add(s), I::sub(a, b));
 
-        q += 2;
+        q += I::COMPLEX_PER_REG;
     }
 }
 
-#[inline(always)]
-pub(crate) unsafe fn fwdend_2_1<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 2);
-    debug_assert_eq!(s, 1);
-    let z = if eo { y } else { x };
-
-    let a = S::getpz(&*z.add(0));
-    let b = S::getpz(&*z.add(1));
-
-    S::setpz(x.add(0), S::addpz(a, b));
-    S::setpz(x.add(1), S::subpz(a, b));
-}
-
-// backward butterfly
-#[inline(always)]
-pub(crate) unsafe fn invcore_s<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
-) {
-    debug_assert_ne!(s, 1);
-
-    let m = n / 4;
-    let big_n = n * s;
-    let big_n0 = 0;
-    let big_n1 = big_n / 4;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-
-    for p in 0..m {
-        let sp = s * p;
-        let s4p = 4 * sp;
-        let w1p = S::duppz5(&*twid_t(4, big_n, 1, w, sp));
-        let w2p = S::duppz5(&*twid_t(4, big_n, 2, w, sp));
-        let w3p = S::duppz5(&*twid_t(4, big_n, 3, w, sp));
-
-        let mut q = 0;
-        loop {
-            if q >= s {
-                break;
+macro_rules! dit4_impl {
+    (
+        $(
+            $(#[$attr: meta])*
+            pub static $fft: ident = Fft {
+                core_1: $core1______: expr,
+                native: $xn: ty,
+                x1: $x1: ty,
+            };
+        )*
+    ) => {
+        $(
+            #[allow(missing_copy_implementations)]
+            #[allow(non_camel_case_types)]
+            #[allow(dead_code)]
+            $(#[$attr])*
+            struct $fft {
+                __private: (),
             }
+            #[allow(unused_variables)]
+            #[allow(dead_code)]
+            $(#[$attr])*
+            impl $fft {
+                unsafe fn fft_00<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {}
+                unsafe fn fft_01<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$x1>(FWD, 1 << 1, 1 << 0, x, y, false);
+                }
+                unsafe fn fft_02<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$x1>(FWD, 1 << 2, 1 << 0, x, y, false);
+                }
+                unsafe fn fft_03<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 2, y, x, true);
+                    $core1______(FWD, 1 << 3, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_04<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 2, 1 << 2, y, x, true);
+                    $core1______(FWD, 1 << 4, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_05<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 4, x, y, false);
+                    core_::<$xn>(FWD, 1 << 3, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 5, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_06<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 2, 1 << 4, x, y, false);
+                    core_::<$xn>(FWD, 1 << 4, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 6, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_07<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 6, y, x, true);
+                    core_::<$xn>(FWD, 1 << 3, 1 << 4, x, y, w);
+                    core_::<$xn>(FWD, 1 << 5, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 7, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_08<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 2, 1 << 6, y, x, true);
+                    core_::<$xn>(FWD, 1 << 4, 1 << 4, x, y, w);
+                    core_::<$xn>(FWD, 1 << 6, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 8, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_09<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 8, x, y, false);
+                    core_::<$xn>(FWD, 1 << 3, 1 << 6, y, x, w);
+                    core_::<$xn>(FWD, 1 << 5, 1 << 4, x, y, w);
+                    core_::<$xn>(FWD, 1 << 7, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 9, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_10<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 8, x, y, false);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 6, y, x, w);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 4, x, y, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 2, y, x, w);
+                    $core1______(FWD, 1 << 10, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_11<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 10, y, x, true);
+                    core_::<$xn>(FWD, 1 << 03, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 05, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 09, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 11, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_12<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 10, y, x, true);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 10, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 12, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_13<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 12, x, y, false);
+                    core_::<$xn>(FWD, 1 << 03, 1 << 10, y, x, w);
+                    core_::<$xn>(FWD, 1 << 05, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 09, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 11, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 13, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_14<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 12, x, y, false);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 10, y, x, w);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 10, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 12, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 14, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_15<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 14, y, x, true);
+                    core_::<$xn>(FWD, 1 << 03, 1 << 12, x, y, w);
+                    core_::<$xn>(FWD, 1 << 05, 1 << 10, y, x, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 09, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 11, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 13, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 15, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_16<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 14, y, x, true);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 12, x, y, w);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 10, y, x, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 08, x, y, w);
+                    core_::<$xn>(FWD, 1 << 10, 1 << 06, y, x, w);
+                    core_::<$xn>(FWD, 1 << 12, 1 << 04, x, y, w);
+                    core_::<$xn>(FWD, 1 << 14, 1 << 02, y, x, w);
+                    $core1______(FWD, 1 << 16, 1 << 00, x, y, w);
+                }
+            }
+            $(#[$attr])*
+            pub(crate) static $fft: crate::FftImpl = crate::FftImpl {
+                fwd: [
+                    <$fft>::fft_00::<true>,
+                    <$fft>::fft_01::<true>,
+                    <$fft>::fft_02::<true>,
+                    <$fft>::fft_03::<true>,
+                    <$fft>::fft_04::<true>,
+                    <$fft>::fft_05::<true>,
+                    <$fft>::fft_06::<true>,
+                    <$fft>::fft_07::<true>,
+                    <$fft>::fft_08::<true>,
+                    <$fft>::fft_09::<true>,
+                    <$fft>::fft_10::<true>,
+                    <$fft>::fft_11::<true>,
+                    <$fft>::fft_12::<true>,
+                    <$fft>::fft_13::<true>,
+                    <$fft>::fft_14::<true>,
+                    <$fft>::fft_15::<true>,
+                    <$fft>::fft_16::<true>,
+                ],
+                inv: [
+                    <$fft>::fft_00::<false>,
+                    <$fft>::fft_01::<false>,
+                    <$fft>::fft_02::<false>,
+                    <$fft>::fft_03::<false>,
+                    <$fft>::fft_04::<false>,
+                    <$fft>::fft_05::<false>,
+                    <$fft>::fft_06::<false>,
+                    <$fft>::fft_07::<false>,
+                    <$fft>::fft_08::<false>,
+                    <$fft>::fft_09::<false>,
+                    <$fft>::fft_10::<false>,
+                    <$fft>::fft_11::<false>,
+                    <$fft>::fft_12::<false>,
+                    <$fft>::fft_13::<false>,
+                    <$fft>::fft_14::<false>,
+                    <$fft>::fft_15::<false>,
+                    <$fft>::fft_16::<false>,
+                ],
+            };
+            )*
+    };
+}
 
-            let xq_sp = x.add(q + sp);
-            let yq_s4p = y.add(q + s4p);
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+use crate::x86::*;
 
-            let a = S::getpz4(yq_s4p.add(0));
-            let b = S::mulpz4(w1p, S::getpz4(yq_s4p.add(s)));
-            let c = S::mulpz4(w2p, S::getpz4(yq_s4p.add(s * 2)));
-            let d = S::mulpz4(w3p, S::getpz4(yq_s4p.add(s * 3)));
+dit4_impl! {
+    pub static DIT4_SCALAR = Fft {
+        core_1: core_::<Scalar>,
+        native: Scalar,
+        x1: Scalar,
+    };
 
-            let apc = S::addpz4(a, c);
-            let amc = S::subpz4(a, c);
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    pub static DIT4_AVX = Fft {
+        core_1: core_x2::<AvxX2>,
+        native: AvxX2,
+        x1: AvxX1,
+    };
 
-            let bpd = S::addpz4(b, d);
-            let jbmd = S::jxpz4(S::subpz4(b, d));
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    pub static DIT4_FMA = Fft {
+        core_1: core_x2::<AvxX2>,
+        native: FmaX2,
+        x1: FmaX1,
+    };
+}
 
-            S::setpz4(xq_sp.add(big_n0), S::addpz4(apc, bpd));
-            S::setpz4(xq_sp.add(big_n1), S::addpz4(amc, jbmd));
-            S::setpz4(xq_sp.add(big_n2), S::subpz4(apc, bpd));
-            S::setpz4(xq_sp.add(big_n3), S::subpz4(amc, jbmd));
-
-            q += 4;
-        }
+pub(crate) fn runtime_fft() -> crate::FftImpl {
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    if is_x86_feature_detected!("fma") {
+        return DIT4_FMA;
+    } else if is_x86_feature_detected!("avx") {
+        return DIT4_AVX;
     }
+
+    DIT4_SCALAR
 }
-
-#[inline(always)]
-pub(crate) unsafe fn invcore_1<S: FftSimd16>(
-    big_n: usize,
-    s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
-) {
-    debug_assert_eq!(s, 1);
-    let big_n0 = 0;
-    let big_n1 = big_n / 4;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-
-    let mut p = 0;
-    loop {
-        if p >= big_n1 {
-            break;
-        }
-
-        let x_p = x.add(p);
-        let y_4p = y.add(4 * p);
-
-        let w1p = S::getpz2(twid(4, big_n, 1, w, p));
-        let w2p = S::getpz2(twid(4, big_n, 2, w, p));
-        let w3p = S::getpz2(twid(4, big_n, 3, w, p));
-
-        let ab0 = S::getpz2(y_4p.add(0));
-        let cd0 = S::getpz2(y_4p.add(2));
-        let ab1 = S::getpz2(y_4p.add(4));
-        let cd1 = S::getpz2(y_4p.add(6));
-
-        let a = S::catlo(ab0, ab1);
-        let b = S::mulpz2(w1p, S::cathi(ab0, ab1));
-        let c = S::mulpz2(w2p, S::catlo(cd0, cd1));
-        let d = S::mulpz2(w3p, S::cathi(cd0, cd1));
-
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
-
-        S::setpz2(x_p.add(big_n0), S::addpz2(apc, bpd));
-        S::setpz2(x_p.add(big_n1), S::addpz2(amc, jbmd));
-        S::setpz2(x_p.add(big_n2), S::subpz2(apc, bpd));
-        S::setpz2(x_p.add(big_n3), S::subpz2(amc, jbmd));
-
-        p += 2;
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn invend_4_s<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 4);
-    debug_assert_ne!(s, 1);
-    let z = if eo { y } else { x };
-
-    let mut q = 0;
-    loop {
-        if q >= s {
-            break;
-        }
-
-        let xq = x.add(q);
-        let zq = z.add(q);
-
-        let a = S::getpz2(zq.add(0));
-        let b = S::getpz2(zq.add(s));
-        let c = S::getpz2(zq.add(s * 2));
-        let d = S::getpz2(zq.add(s * 3));
-
-        let apc = S::addpz2(a, c);
-        let amc = S::subpz2(a, c);
-        let bpd = S::addpz2(b, d);
-        let jbmd = S::jxpz2(S::subpz2(b, d));
-
-        S::setpz2(xq.add(0), S::addpz2(apc, bpd));
-        S::setpz2(xq.add(s), S::addpz2(amc, jbmd));
-        S::setpz2(xq.add(s * 2), S::subpz2(apc, bpd));
-        S::setpz2(xq.add(s * 3), S::subpz2(amc, jbmd));
-
-        q += 2;
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn invend_4_1<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 4);
-    debug_assert_eq!(s, 1);
-    let z = if eo { y } else { x };
-
-    let a = S::getpz(&*z.add(0));
-    let b = S::getpz(&*z.add(1));
-    let c = S::getpz(&*z.add(2));
-    let d = S::getpz(&*z.add(3));
-
-    let apc = S::addpz(a, c);
-    let amc = S::subpz(a, c);
-    let bpd = S::addpz(b, d);
-    let jbmd = S::jxpz(S::subpz(b, d));
-
-    S::setpz(x.add(0), S::addpz(apc, bpd));
-    S::setpz(x.add(1), S::addpz(amc, jbmd));
-    S::setpz(x.add(2), S::subpz(apc, bpd));
-    S::setpz(x.add(3), S::subpz(amc, jbmd));
-}
-
-#[inline(always)]
-pub(crate) unsafe fn invend_2_s<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    fwdend_2_s::<S>(n, s, eo, x, y);
-}
-
-#[inline(always)]
-pub(crate) unsafe fn invend_2_1<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    fwdend_2_1::<S>(n, s, eo, x, y);
-}
-
-/// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
-/// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(forward: bool, n: usize, twiddles: &mut [c64]) {
-    crate::dif4::init_twiddles(forward, n, twiddles);
-}
-
-include!(concat!(env!("OUT_DIR"), "/dit4.rs"));
-include!("./boilerplate.rs");

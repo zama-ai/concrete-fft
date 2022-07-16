@@ -1,20 +1,18 @@
 use crate::c64;
-use crate::fft_simd::FftSimd16;
-use crate::twiddles::{twid, twid_t};
+use crate::dit4::{end_2, end_4};
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
 
-pub(crate) use crate::dit4::fwdend_2_1;
-pub(crate) use crate::dit4::fwdend_2_s;
-pub(crate) use crate::dit4::fwdend_4_1;
-pub(crate) use crate::dit4::fwdend_4_s;
-pub(crate) use crate::dit4::invend_2_1;
-pub(crate) use crate::dit4::invend_2_s;
-pub(crate) use crate::dit4::invend_4_1;
-pub(crate) use crate::dit4::invend_4_s;
-
-// forward butterfly
 #[inline(always)]
-unsafe fn fwdcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, w: *const c64) {
-    debug_assert_ne!(s, 1);
+#[rustfmt::skip]
+unsafe fn core_<I: FftSimd64>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
+    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
 
     let m = n / 8;
     let big_n = n * s;
@@ -30,65 +28,74 @@ unsafe fn fwdcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, 
     for p in 0..m {
         let sp = s * p;
         let s8p = 8 * sp;
-
-        let w1p = S::duppz3(&*twid_t(8, big_n, 1, w, sp));
-        let w2p = S::duppz3(&*twid_t(8, big_n, 2, w, sp));
-        let w3p = S::duppz3(&*twid_t(8, big_n, 3, w, sp));
-        let w4p = S::duppz3(&*twid_t(8, big_n, 4, w, sp));
-        let w5p = S::duppz3(&*twid_t(8, big_n, 5, w, sp));
-        let w6p = S::duppz3(&*twid_t(8, big_n, 6, w, sp));
-        let w7p = S::duppz3(&*twid_t(8, big_n, 7, w, sp));
+        let w1p = I::splat(twid_t(8, big_n, 1, w, sp));
+        let w2p = I::splat(twid_t(8, big_n, 2, w, sp));
+        let w3p = I::splat(twid_t(8, big_n, 3, w, sp));
+        let w4p = I::splat(twid_t(8, big_n, 4, w, sp));
+        let w5p = I::splat(twid_t(8, big_n, 5, w, sp));
+        let w6p = I::splat(twid_t(8, big_n, 6, w, sp));
+        let w7p = I::splat(twid_t(8, big_n, 7, w, sp));
 
         let mut q = 0;
         while q < s {
             let xq_sp = x.add(q + sp);
             let yq_s8p = y.add(q + s8p);
 
-            let y0 = S::getpz2(yq_s8p.add(0));
-            let y1 = S::mulpz2(w1p, S::getpz2(yq_s8p.add(s)));
-            let y2 = S::mulpz2(w2p, S::getpz2(yq_s8p.add(s * 2)));
-            let y3 = S::mulpz2(w3p, S::getpz2(yq_s8p.add(s * 3)));
-            let y4 = S::mulpz2(w4p, S::getpz2(yq_s8p.add(s * 4)));
-            let y5 = S::mulpz2(w5p, S::getpz2(yq_s8p.add(s * 5)));
-            let y6 = S::mulpz2(w6p, S::getpz2(yq_s8p.add(s * 6)));
-            let y7 = S::mulpz2(w7p, S::getpz2(yq_s8p.add(s * 7)));
-            let a04 = S::addpz2(y0, y4);
-            let s04 = S::subpz2(y0, y4);
-            let a26 = S::addpz2(y2, y6);
-            let js26 = S::jxpz2(S::subpz2(y2, y6));
-            let a15 = S::addpz2(y1, y5);
-            let s15 = S::subpz2(y1, y5);
-            let a37 = S::addpz2(y3, y7);
-            let js37 = S::jxpz2(S::subpz2(y3, y7));
+            let y0 = I::load(yq_s8p.add(0));
+            let y1 = I::mul(w1p, I::load(yq_s8p.add(s)));
+            let y2 = I::mul(w2p, I::load(yq_s8p.add(s * 2)));
+            let y3 = I::mul(w3p, I::load(yq_s8p.add(s * 3)));
+            let y4 = I::mul(w4p, I::load(yq_s8p.add(s * 4)));
+            let y5 = I::mul(w5p, I::load(yq_s8p.add(s * 5)));
+            let y6 = I::mul(w6p, I::load(yq_s8p.add(s * 6)));
+            let y7 = I::mul(w7p, I::load(yq_s8p.add(s * 7)));
+            let a04 = I::add(y0, y4);
+            let s04 = I::sub(y0, y4);
+            let a26 = I::add(y2, y6);
+            let js26 = I::xpj(fwd, I::sub(y2, y6));
+            let a15 = I::add(y1, y5);
+            let s15 = I::sub(y1, y5);
+            let a37 = I::add(y3, y7);
+            let js37 = I::xpj(fwd, I::sub(y3, y7));
 
-            let a04_p1_a26 = S::addpz2(a04, a26);
-            let a15_p1_a37 = S::addpz2(a15, a37);
-            S::setpz2(xq_sp.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
-            S::setpz2(xq_sp.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
+            let a04_p1_a26 = I::add(a04, a26);
+            let a15_p1_a37 = I::add(a15, a37);
+            I::store(xq_sp.add(big_n0), I::add(a04_p1_a26, a15_p1_a37));
+            I::store(xq_sp.add(big_n4), I::sub(a04_p1_a26, a15_p1_a37));
 
-            let s04_mj_s26 = S::subpz2(s04, js26);
-            let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-            S::setpz2(xq_sp.add(big_n1), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
-            S::setpz2(xq_sp.add(big_n5), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
+            let s04_mj_s26 = I::sub(s04, js26);
+            let w8_s15_mj_s37 = I::xw8(fwd, I::sub(s15, js37));
+            I::store(xq_sp.add(big_n1), I::add(s04_mj_s26, w8_s15_mj_s37));
+            I::store(xq_sp.add(big_n5), I::sub(s04_mj_s26, w8_s15_mj_s37));
 
-            let a04_m1_a26 = S::subpz2(a04, a26);
-            let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-            S::setpz2(xq_sp.add(big_n2), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-            S::setpz2(xq_sp.add(big_n6), S::addpz2(a04_m1_a26, j_a15_m1_a37));
+            let a04_m1_a26 = I::sub(a04, a26);
+            let j_a15_m1_a37 = I::xpj(fwd, I::sub(a15, a37));
+            I::store(xq_sp.add(big_n2), I::sub(a04_m1_a26, j_a15_m1_a37));
+            I::store(xq_sp.add(big_n6), I::add(a04_m1_a26, j_a15_m1_a37));
 
-            let s04_pj_s26 = S::addpz2(s04, js26);
-            let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-            S::setpz2(xq_sp.add(big_n3), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-            S::setpz2(xq_sp.add(big_n7), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
+            let s04_pj_s26 = I::add(s04, js26);
+            let v8_s15_pj_s37 = I::xv8(fwd, I::add(s15, js37));
+            I::store(xq_sp.add(big_n3), I::sub(s04_pj_s26, v8_s15_pj_s37));
+            I::store(xq_sp.add(big_n7), I::add(s04_pj_s26, v8_s15_pj_s37));
 
-            q += 2;
+            q += I::COMPLEX_PER_REG;
         }
     }
 }
 
 #[inline(always)]
-unsafe fn fwdcore_1<S: FftSimd16>(big_n: usize, s: usize, x: *mut c64, y: *mut c64, w: *const c64) {
+unsafe fn core_x2<I: FftSimd64X2>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
     debug_assert_eq!(s, 1);
+    debug_assert_eq!(I::COMPLEX_PER_REG, 2);
+
+    let big_n = n;
     let big_n0 = 0;
     let big_n1 = big_n / 8;
     let big_n2 = big_n1 * 2;
@@ -103,222 +110,74 @@ unsafe fn fwdcore_1<S: FftSimd16>(big_n: usize, s: usize, x: *mut c64, y: *mut c
         let x_p = x.add(p);
         let y_8p = y.add(8 * p);
 
-        let w1p = S::getpz2(twid(8, big_n, 1, w, p));
-        let w2p = S::getpz2(twid(8, big_n, 2, w, p));
-        let w3p = S::getpz2(twid(8, big_n, 3, w, p));
-        let w4p = S::getpz2(twid(8, big_n, 4, w, p));
-        let w5p = S::getpz2(twid(8, big_n, 5, w, p));
-        let w6p = S::getpz2(twid(8, big_n, 6, w, p));
-        let w7p = S::getpz2(twid(8, big_n, 7, w, p));
-        let ab_0 = S::getpz2(y_8p.add(0));
-        let cd_0 = S::getpz2(y_8p.add(2));
-        let ef_0 = S::getpz2(y_8p.add(4));
-        let gh_0 = S::getpz2(y_8p.add(6));
-        let ab_1 = S::getpz2(y_8p.add(8));
-        let cd_1 = S::getpz2(y_8p.add(10));
-        let ef_1 = S::getpz2(y_8p.add(12));
-        let gh_1 = S::getpz2(y_8p.add(14));
-        let y0 = S::catlo(ab_0, ab_1);
-        let y1 = S::mulpz2(w1p, S::cathi(ab_0, ab_1));
-        let y2 = S::mulpz2(w2p, S::catlo(cd_0, cd_1));
-        let y3 = S::mulpz2(w3p, S::cathi(cd_0, cd_1));
-        let y4 = S::mulpz2(w4p, S::catlo(ef_0, ef_1));
-        let y5 = S::mulpz2(w5p, S::cathi(ef_0, ef_1));
-        let y6 = S::mulpz2(w6p, S::catlo(gh_0, gh_1));
-        let y7 = S::mulpz2(w7p, S::cathi(gh_0, gh_1));
+        let w1p = I::load(twid(8, big_n, 1, w, p));
+        let w2p = I::load(twid(8, big_n, 2, w, p));
+        let w3p = I::load(twid(8, big_n, 3, w, p));
+        let w4p = I::load(twid(8, big_n, 4, w, p));
+        let w5p = I::load(twid(8, big_n, 5, w, p));
+        let w6p = I::load(twid(8, big_n, 6, w, p));
+        let w7p = I::load(twid(8, big_n, 7, w, p));
+        let ab_0 = I::load(y_8p.add(0));
+        let cd_0 = I::load(y_8p.add(2));
+        let ef_0 = I::load(y_8p.add(4));
+        let gh_0 = I::load(y_8p.add(6));
+        let ab_1 = I::load(y_8p.add(8));
+        let cd_1 = I::load(y_8p.add(10));
+        let ef_1 = I::load(y_8p.add(12));
+        let gh_1 = I::load(y_8p.add(14));
+        let y0 = I::catlo(ab_0, ab_1);
+        let y1 = I::mul(w1p, I::cathi(ab_0, ab_1));
+        let y2 = I::mul(w2p, I::catlo(cd_0, cd_1));
+        let y3 = I::mul(w3p, I::cathi(cd_0, cd_1));
+        let y4 = I::mul(w4p, I::catlo(ef_0, ef_1));
+        let y5 = I::mul(w5p, I::cathi(ef_0, ef_1));
+        let y6 = I::mul(w6p, I::catlo(gh_0, gh_1));
+        let y7 = I::mul(w7p, I::cathi(gh_0, gh_1));
 
-        let a04 = S::addpz2(y0, y4);
-        let s04 = S::subpz2(y0, y4);
-        let a26 = S::addpz2(y2, y6);
-        let js26 = S::jxpz2(S::subpz2(y2, y6));
-        let a15 = S::addpz2(y1, y5);
-        let s15 = S::subpz2(y1, y5);
-        let a37 = S::addpz2(y3, y7);
-        let js37 = S::jxpz2(S::subpz2(y3, y7));
+        let a04 = I::add(y0, y4);
+        let s04 = I::sub(y0, y4);
+        let a26 = I::add(y2, y6);
+        let js26 = I::xpj(fwd, I::sub(y2, y6));
+        let a15 = I::add(y1, y5);
+        let s15 = I::sub(y1, y5);
+        let a37 = I::add(y3, y7);
+        let js37 = I::xpj(fwd, I::sub(y3, y7));
 
-        let a04_p1_a26 = S::addpz2(a04, a26);
-        let a15_p1_a37 = S::addpz2(a15, a37);
-        S::setpz2(x_p.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(x_p.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
+        let a04_p1_a26 = I::add(a04, a26);
+        let a15_p1_a37 = I::add(a15, a37);
+        I::store(x_p.add(big_n0), I::add(a04_p1_a26, a15_p1_a37));
+        I::store(x_p.add(big_n4), I::sub(a04_p1_a26, a15_p1_a37));
 
-        let s04_mj_s26 = S::subpz2(s04, js26);
-        let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-        S::setpz2(x_p.add(big_n1), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
-        S::setpz2(x_p.add(big_n5), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
+        let s04_mj_s26 = I::sub(s04, js26);
+        let w8_s15_mj_s37 = I::xw8(fwd, I::sub(s15, js37));
+        I::store(x_p.add(big_n1), I::add(s04_mj_s26, w8_s15_mj_s37));
+        I::store(x_p.add(big_n5), I::sub(s04_mj_s26, w8_s15_mj_s37));
 
-        let a04_m1_a26 = S::subpz2(a04, a26);
-        let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-        S::setpz2(x_p.add(big_n2), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(x_p.add(big_n6), S::addpz2(a04_m1_a26, j_a15_m1_a37));
+        let a04_m1_a26 = I::sub(a04, a26);
+        let j_a15_m1_a37 = I::xpj(fwd, I::sub(a15, a37));
+        I::store(x_p.add(big_n2), I::sub(a04_m1_a26, j_a15_m1_a37));
+        I::store(x_p.add(big_n6), I::add(a04_m1_a26, j_a15_m1_a37));
 
-        let s04_pj_s26 = S::addpz2(s04, js26);
-        let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-        S::setpz2(x_p.add(big_n3), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-        S::setpz2(x_p.add(big_n7), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
-
-        p += 2;
-    }
-}
-
-// backward butterfly
-#[inline(always)]
-unsafe fn invcore_s<S: FftSimd16>(n: usize, s: usize, x: *mut c64, y: *mut c64, w: *const c64) {
-    debug_assert_ne!(s, 1);
-
-    let m = n / 8;
-    let big_n = n * s;
-    let big_n0 = 0;
-    let big_n1 = big_n / 8;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-    let big_n4 = big_n1 * 4;
-    let big_n5 = big_n1 * 5;
-    let big_n6 = big_n1 * 6;
-    let big_n7 = big_n1 * 7;
-
-    for p in 0..m {
-        let sp = s * p;
-        let s8p = 8 * sp;
-
-        let w1p = S::duppz3(&*twid_t(8, big_n, 1, w, sp));
-        let w2p = S::duppz3(&*twid_t(8, big_n, 2, w, sp));
-        let w3p = S::duppz3(&*twid_t(8, big_n, 3, w, sp));
-        let w4p = S::duppz3(&*twid_t(8, big_n, 4, w, sp));
-        let w5p = S::duppz3(&*twid_t(8, big_n, 5, w, sp));
-        let w6p = S::duppz3(&*twid_t(8, big_n, 6, w, sp));
-        let w7p = S::duppz3(&*twid_t(8, big_n, 7, w, sp));
-
-        let mut q = 0;
-        while q < s {
-            let xq_sp = x.add(q + sp);
-            let yq_s8p = y.add(q + s8p);
-
-            let y0 = S::getpz2(yq_s8p.add(0));
-            let y1 = S::mulpz2(w1p, S::getpz2(yq_s8p.add(s)));
-            let y2 = S::mulpz2(w2p, S::getpz2(yq_s8p.add(s * 2)));
-            let y3 = S::mulpz2(w3p, S::getpz2(yq_s8p.add(s * 3)));
-            let y4 = S::mulpz2(w4p, S::getpz2(yq_s8p.add(s * 4)));
-            let y5 = S::mulpz2(w5p, S::getpz2(yq_s8p.add(s * 5)));
-            let y6 = S::mulpz2(w6p, S::getpz2(yq_s8p.add(s * 6)));
-            let y7 = S::mulpz2(w7p, S::getpz2(yq_s8p.add(s * 7)));
-            let a04 = S::addpz2(y0, y4);
-            let s04 = S::subpz2(y0, y4);
-            let a26 = S::addpz2(y2, y6);
-            let js26 = S::jxpz2(S::subpz2(y2, y6));
-            let a15 = S::addpz2(y1, y5);
-            let s15 = S::subpz2(y1, y5);
-            let a37 = S::addpz2(y3, y7);
-            let js37 = S::jxpz2(S::subpz2(y3, y7));
-
-            let a04_p1_a26 = S::addpz2(a04, a26);
-            let a15_p1_a37 = S::addpz2(a15, a37);
-            S::setpz2(xq_sp.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
-            S::setpz2(xq_sp.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
-
-            let s04_pj_s26 = S::addpz2(s04, js26);
-            let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-            S::setpz2(xq_sp.add(big_n1), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
-            S::setpz2(xq_sp.add(big_n5), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-
-            let a04_m1_a26 = S::subpz2(a04, a26);
-            let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-            S::setpz2(xq_sp.add(big_n2), S::addpz2(a04_m1_a26, j_a15_m1_a37));
-            S::setpz2(xq_sp.add(big_n6), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-
-            let s04_mj_s26 = S::subpz2(s04, js26);
-            let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-            S::setpz2(xq_sp.add(big_n3), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
-            S::setpz2(xq_sp.add(big_n7), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
-
-            q += 2;
-        }
-    }
-}
-
-#[inline(always)]
-unsafe fn invcore_1<S: FftSimd16>(big_n: usize, s: usize, x: *mut c64, y: *mut c64, w: *const c64) {
-    debug_assert_eq!(s, 1);
-    let big_n0 = 0;
-    let big_n1 = big_n / 8;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-    let big_n4 = big_n1 * 4;
-    let big_n5 = big_n1 * 5;
-    let big_n6 = big_n1 * 6;
-    let big_n7 = big_n1 * 7;
-
-    let mut p = 0;
-    while p < big_n1 {
-        let x_p = x.add(p);
-        let y_8p = y.add(8 * p);
-
-        let w1p = S::getpz2(twid(8, big_n, 1, w, p));
-        let w2p = S::getpz2(twid(8, big_n, 2, w, p));
-        let w3p = S::getpz2(twid(8, big_n, 3, w, p));
-        let w4p = S::getpz2(twid(8, big_n, 4, w, p));
-        let w5p = S::getpz2(twid(8, big_n, 5, w, p));
-        let w6p = S::getpz2(twid(8, big_n, 6, w, p));
-        let w7p = S::getpz2(twid(8, big_n, 7, w, p));
-        let ab_0 = S::getpz2(y_8p.add(0));
-        let cd_0 = S::getpz2(y_8p.add(2));
-        let ef_0 = S::getpz2(y_8p.add(4));
-        let gh_0 = S::getpz2(y_8p.add(6));
-        let ab_1 = S::getpz2(y_8p.add(8));
-        let cd_1 = S::getpz2(y_8p.add(10));
-        let ef_1 = S::getpz2(y_8p.add(12));
-        let gh_1 = S::getpz2(y_8p.add(14));
-        let y0 = S::catlo(ab_0, ab_1);
-        let y1 = S::mulpz2(w1p, S::cathi(ab_0, ab_1));
-        let y2 = S::mulpz2(w2p, S::catlo(cd_0, cd_1));
-        let y3 = S::mulpz2(w3p, S::cathi(cd_0, cd_1));
-        let y4 = S::mulpz2(w4p, S::catlo(ef_0, ef_1));
-        let y5 = S::mulpz2(w5p, S::cathi(ef_0, ef_1));
-        let y6 = S::mulpz2(w6p, S::catlo(gh_0, gh_1));
-        let y7 = S::mulpz2(w7p, S::cathi(gh_0, gh_1));
-
-        let a04 = S::addpz2(y0, y4);
-        let s04 = S::subpz2(y0, y4);
-        let a26 = S::addpz2(y2, y6);
-        let js26 = S::jxpz2(S::subpz2(y2, y6));
-        let a15 = S::addpz2(y1, y5);
-        let s15 = S::subpz2(y1, y5);
-        let a37 = S::addpz2(y3, y7);
-        let js37 = S::jxpz2(S::subpz2(y3, y7));
-
-        let a04_p1_a26 = S::addpz2(a04, a26);
-        let a15_p1_a37 = S::addpz2(a15, a37);
-        S::setpz2(x_p.add(big_n0), S::addpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(x_p.add(big_n4), S::subpz2(a04_p1_a26, a15_p1_a37));
-
-        let s04_pj_s26 = S::addpz2(s04, js26);
-        let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-        S::setpz2(x_p.add(big_n1), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
-        S::setpz2(x_p.add(big_n5), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-
-        let a04_m1_a26 = S::subpz2(a04, a26);
-        let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-        S::setpz2(x_p.add(big_n2), S::addpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(x_p.add(big_n6), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-
-        let s04_mj_s26 = S::subpz2(s04, js26);
-        let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-        S::setpz2(x_p.add(big_n3), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
-        S::setpz2(x_p.add(big_n7), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
+        let s04_pj_s26 = I::add(s04, js26);
+        let v8_s15_pj_s37 = I::xv8(fwd, I::add(s15, js37));
+        I::store(x_p.add(big_n3), I::sub(s04_pj_s26, v8_s15_pj_s37));
+        I::store(x_p.add(big_n7), I::add(s04_pj_s26, v8_s15_pj_s37));
 
         p += 2;
     }
 }
 
 #[inline(always)]
-pub(crate) unsafe fn fwdend_8_s<S: FftSimd16>(
+pub(crate) unsafe fn end_8<I: FftSimd64>(
+    fwd: bool,
     n: usize,
     s: usize,
-    eo: bool,
     x: *mut c64,
     y: *mut c64,
+    eo: bool,
 ) {
     debug_assert_eq!(n, 8);
-    debug_assert_ne!(s, 1);
+    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
 
     let z = if eo { y } else { x };
 
@@ -327,197 +186,228 @@ pub(crate) unsafe fn fwdend_8_s<S: FftSimd16>(
         let xq = x.add(q);
         let zq = z.add(q);
 
-        let z0 = S::getpz2(zq.add(0));
-        let z1 = S::getpz2(zq.add(s));
-        let z2 = S::getpz2(zq.add(s * 2));
-        let z3 = S::getpz2(zq.add(s * 3));
-        let z4 = S::getpz2(zq.add(s * 4));
-        let z5 = S::getpz2(zq.add(s * 5));
-        let z6 = S::getpz2(zq.add(s * 6));
-        let z7 = S::getpz2(zq.add(s * 7));
-        let a04 = S::addpz2(z0, z4);
-        let s04 = S::subpz2(z0, z4);
-        let a26 = S::addpz2(z2, z6);
-        let js26 = S::jxpz2(S::subpz2(z2, z6));
-        let a15 = S::addpz2(z1, z5);
-        let s15 = S::subpz2(z1, z5);
-        let a37 = S::addpz2(z3, z7);
-        let js37 = S::jxpz2(S::subpz2(z3, z7));
-        let a04_p1_a26 = S::addpz2(a04, a26);
-        let s04_mj_s26 = S::subpz2(s04, js26);
-        let a04_m1_a26 = S::subpz2(a04, a26);
-        let s04_pj_s26 = S::addpz2(s04, js26);
-        let a15_p1_a37 = S::addpz2(a15, a37);
-        let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-        let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-        let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-        S::setpz2(xq.add(0), S::addpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(xq.add(s), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
-        S::setpz2(xq.add(s * 2), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(xq.add(s * 3), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-        S::setpz2(xq.add(s * 4), S::subpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(xq.add(s * 5), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
-        S::setpz2(xq.add(s * 6), S::addpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(xq.add(s * 7), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
+        let z0 = I::load(zq.add(0));
+        let z1 = I::load(zq.add(s));
+        let z2 = I::load(zq.add(s * 2));
+        let z3 = I::load(zq.add(s * 3));
+        let z4 = I::load(zq.add(s * 4));
+        let z5 = I::load(zq.add(s * 5));
+        let z6 = I::load(zq.add(s * 6));
+        let z7 = I::load(zq.add(s * 7));
+        let a04 = I::add(z0, z4);
+        let s04 = I::sub(z0, z4);
+        let a26 = I::add(z2, z6);
+        let js26 = I::xpj(fwd, I::sub(z2, z6));
+        let a15 = I::add(z1, z5);
+        let s15 = I::sub(z1, z5);
+        let a37 = I::add(z3, z7);
+        let js37 = I::xpj(fwd, I::sub(z3, z7));
+        let a04_p1_a26 = I::add(a04, a26);
+        let s04_mj_s26 = I::sub(s04, js26);
+        let a04_m1_a26 = I::sub(a04, a26);
+        let s04_pj_s26 = I::add(s04, js26);
+        let a15_p1_a37 = I::add(a15, a37);
+        let w8_s15_mj_s37 = I::xw8(fwd, I::sub(s15, js37));
+        let j_a15_m1_a37 = I::xpj(fwd, I::sub(a15, a37));
+        let v8_s15_pj_s37 = I::xv8(fwd, I::add(s15, js37));
+        I::store(xq.add(0), I::add(a04_p1_a26, a15_p1_a37));
+        I::store(xq.add(s), I::add(s04_mj_s26, w8_s15_mj_s37));
+        I::store(xq.add(s * 2), I::sub(a04_m1_a26, j_a15_m1_a37));
+        I::store(xq.add(s * 3), I::sub(s04_pj_s26, v8_s15_pj_s37));
+        I::store(xq.add(s * 4), I::sub(a04_p1_a26, a15_p1_a37));
+        I::store(xq.add(s * 5), I::sub(s04_mj_s26, w8_s15_mj_s37));
+        I::store(xq.add(s * 6), I::add(a04_m1_a26, j_a15_m1_a37));
+        I::store(xq.add(s * 7), I::add(s04_pj_s26, v8_s15_pj_s37));
 
-        q += 2;
+        q += I::COMPLEX_PER_REG;
     }
 }
 
-#[inline(always)]
-pub(crate) unsafe fn fwdend_8_1<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 8);
-    debug_assert_eq!(s, 1);
-
-    let z = if eo { y } else { x };
-
-    let z0 = S::getpz(&*z.add(0));
-    let z1 = S::getpz(&*z.add(1));
-    let z2 = S::getpz(&*z.add(2));
-    let z3 = S::getpz(&*z.add(3));
-    let z4 = S::getpz(&*z.add(4));
-    let z5 = S::getpz(&*z.add(5));
-    let z6 = S::getpz(&*z.add(6));
-    let z7 = S::getpz(&*z.add(7));
-    let a04 = S::addpz(z0, z4);
-    let s04 = S::subpz(z0, z4);
-    let a26 = S::addpz(z2, z6);
-    let js26 = S::jxpz(S::subpz(z2, z6));
-    let a15 = S::addpz(z1, z5);
-    let s15 = S::subpz(z1, z5);
-    let a37 = S::addpz(z3, z7);
-    let js37 = S::jxpz(S::subpz(z3, z7));
-    let a04_p1_a26 = S::addpz(a04, a26);
-    let s04_mj_s26 = S::subpz(s04, js26);
-    let a04_m1_a26 = S::subpz(a04, a26);
-    let s04_pj_s26 = S::addpz(s04, js26);
-    let a15_p1_a37 = S::addpz(a15, a37);
-    let w8_s15_mj_s37 = S::w8xpz(S::subpz(s15, js37));
-    let j_a15_m1_a37 = S::jxpz(S::subpz(a15, a37));
-    let v8_s15_pj_s37 = S::v8xpz(S::addpz(s15, js37));
-    S::setpz(x.add(0), S::addpz(a04_p1_a26, a15_p1_a37));
-    S::setpz(x.add(1), S::addpz(s04_mj_s26, w8_s15_mj_s37));
-    S::setpz(x.add(2), S::subpz(a04_m1_a26, j_a15_m1_a37));
-    S::setpz(x.add(3), S::subpz(s04_pj_s26, v8_s15_pj_s37));
-    S::setpz(x.add(4), S::subpz(a04_p1_a26, a15_p1_a37));
-    S::setpz(x.add(5), S::subpz(s04_mj_s26, w8_s15_mj_s37));
-    S::setpz(x.add(6), S::addpz(a04_m1_a26, j_a15_m1_a37));
-    S::setpz(x.add(7), S::addpz(s04_pj_s26, v8_s15_pj_s37));
+macro_rules! dit8_impl {
+    (
+        $(
+            $(#[$attr: meta])*
+            pub static $fft: ident = Fft {
+                core_1: $core1______: expr,
+                native: $xn: ty,
+                x1: $x1: ty,
+            };
+        )*
+    ) => {
+        $(
+            #[allow(missing_copy_implementations)]
+            #[allow(non_camel_case_types)]
+            #[allow(dead_code)]
+            $(#[$attr])*
+            struct $fft {
+                __private: (),
+            }
+            #[allow(unused_variables)]
+            #[allow(dead_code)]
+            $(#[$attr])*
+            impl $fft {
+                unsafe fn fft_00<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {}
+                unsafe fn fft_01<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$x1>(FWD, 1 << 1, 1 << 0, x, y, false);
+                }
+                unsafe fn fft_02<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$x1>(FWD, 1 << 2, 1 << 0, x, y, false);
+                }
+                unsafe fn fft_03<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_8::<$x1>(FWD, 1 << 3, 1 << 0, x, y, false);
+                }
+                unsafe fn fft_04<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 3, y, x, true);
+                    $core1______(FWD, 1 << 4, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_05<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 2, 1 << 3, y, x, true);
+                    $core1______(FWD, 1 << 5, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_06<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_8::<$xn>(FWD, 1 << 3, 1 << 3, y, x, true);
+                    $core1______(FWD, 1 << 6, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_07<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 1, 1 << 6, x, y, false);
+                    core_::<$xn>(FWD, 1 << 4, 1 << 3, y, x, w);
+                    $core1______(FWD, 1 << 7, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_08<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 2, 1 << 6, x, y, false);
+                    core_::<$xn>(FWD, 1 << 5, 1 << 3, y, x, w);
+                    $core1______(FWD, 1 << 8, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_09<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_8::<$xn>(FWD, 1 << 3, 1 << 6, x, y, false);
+                    core_::<$xn>(FWD, 1 << 6, 1 << 3, y, x, w);
+                    $core1______(FWD, 1 << 9, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_10<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 9, y, x, true);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 6, x, y, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 3, y, x, w);
+                    $core1______(FWD, 1 << 10, 1 << 0, x, y, w);
+                }
+                unsafe fn fft_11<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 09, y, x, true);
+                    core_::<$xn>(FWD, 1 << 05, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 11, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_12<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_8::<$xn>(FWD, 1 << 03, 1 << 09, y, x, true);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 09, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 12, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_13<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 12, x, y, false);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 09, y, x, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 10, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 13, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_14<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_4::<$xn>(FWD, 1 << 02, 1 << 12, x, y, false);
+                    core_::<$xn>(FWD, 1 << 05, 1 << 09, y, x, w);
+                    core_::<$xn>(FWD, 1 << 08, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 11, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 14, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_15<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_8::<$xn>(FWD, 1 << 03, 1 << 12, x, y, false);
+                    core_::<$xn>(FWD, 1 << 06, 1 << 09, y, x, w);
+                    core_::<$xn>(FWD, 1 << 09, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 12, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 15, 1 << 00, x, y, w);
+                }
+                unsafe fn fft_16<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
+                    end_2::<$xn>(FWD, 1 << 01, 1 << 15, y, x, true);
+                    core_::<$xn>(FWD, 1 << 04, 1 << 12, x, y, w);
+                    core_::<$xn>(FWD, 1 << 07, 1 << 09, y, x, w);
+                    core_::<$xn>(FWD, 1 << 10, 1 << 06, x, y, w);
+                    core_::<$xn>(FWD, 1 << 13, 1 << 03, y, x, w);
+                    $core1______(FWD, 1 << 16, 1 << 00, x, y, w);
+                }
+            }
+            $(#[$attr])*
+            pub(crate) static $fft: crate::FftImpl = crate::FftImpl {
+                fwd: [
+                    <$fft>::fft_00::<true>,
+                    <$fft>::fft_01::<true>,
+                    <$fft>::fft_02::<true>,
+                    <$fft>::fft_03::<true>,
+                    <$fft>::fft_04::<true>,
+                    <$fft>::fft_05::<true>,
+                    <$fft>::fft_06::<true>,
+                    <$fft>::fft_07::<true>,
+                    <$fft>::fft_08::<true>,
+                    <$fft>::fft_09::<true>,
+                    <$fft>::fft_10::<true>,
+                    <$fft>::fft_11::<true>,
+                    <$fft>::fft_12::<true>,
+                    <$fft>::fft_13::<true>,
+                    <$fft>::fft_14::<true>,
+                    <$fft>::fft_15::<true>,
+                    <$fft>::fft_16::<true>,
+                ],
+                inv: [
+                    <$fft>::fft_00::<false>,
+                    <$fft>::fft_01::<false>,
+                    <$fft>::fft_02::<false>,
+                    <$fft>::fft_03::<false>,
+                    <$fft>::fft_04::<false>,
+                    <$fft>::fft_05::<false>,
+                    <$fft>::fft_06::<false>,
+                    <$fft>::fft_07::<false>,
+                    <$fft>::fft_08::<false>,
+                    <$fft>::fft_09::<false>,
+                    <$fft>::fft_10::<false>,
+                    <$fft>::fft_11::<false>,
+                    <$fft>::fft_12::<false>,
+                    <$fft>::fft_13::<false>,
+                    <$fft>::fft_14::<false>,
+                    <$fft>::fft_15::<false>,
+                    <$fft>::fft_16::<false>,
+                ],
+            };
+            )*
+    };
 }
 
-#[inline(always)]
-pub(crate) unsafe fn invend_8_s<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 8);
-    debug_assert_ne!(s, 1);
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+use crate::x86::*;
 
-    let z = if eo { y } else { x };
+dit8_impl! {
+    pub static DIT8_SCALAR = Fft {
+        core_1: core_::<Scalar>,
+        native: Scalar,
+        x1: Scalar,
+    };
 
-    let mut q = 0;
-    while q < s {
-        let xq = x.add(q);
-        let zq = z.add(q);
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    pub static DIT8_AVX = Fft {
+        core_1: core_x2::<AvxX2>,
+        native: AvxX2,
+        x1: AvxX1,
+    };
 
-        let z0 = S::getpz2(zq.add(0));
-        let z1 = S::getpz2(zq.add(s));
-        let z2 = S::getpz2(zq.add(s * 2));
-        let z3 = S::getpz2(zq.add(s * 3));
-        let z4 = S::getpz2(zq.add(s * 4));
-        let z5 = S::getpz2(zq.add(s * 5));
-        let z6 = S::getpz2(zq.add(s * 6));
-        let z7 = S::getpz2(zq.add(s * 7));
-        let a04 = S::addpz2(z0, z4);
-        let s04 = S::subpz2(z0, z4);
-        let a26 = S::addpz2(z2, z6);
-        let js26 = S::jxpz2(S::subpz2(z2, z6));
-        let a15 = S::addpz2(z1, z5);
-        let s15 = S::subpz2(z1, z5);
-        let a37 = S::addpz2(z3, z7);
-        let js37 = S::jxpz2(S::subpz2(z3, z7));
-        let a04_p1_a26 = S::addpz2(a04, a26);
-        let s04_pj_s26 = S::addpz2(s04, js26);
-        let a04_m1_a26 = S::subpz2(a04, a26);
-        let s04_mj_s26 = S::subpz2(s04, js26);
-        let a15_p1_a37 = S::addpz2(a15, a37);
-        let v8_s15_pj_s37 = S::v8xpz2(S::addpz2(s15, js37));
-        let j_a15_m1_a37 = S::jxpz2(S::subpz2(a15, a37));
-        let w8_s15_mj_s37 = S::w8xpz2(S::subpz2(s15, js37));
-        S::setpz2(xq.add(0), S::addpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(xq.add(s), S::addpz2(s04_pj_s26, v8_s15_pj_s37));
-        S::setpz2(xq.add(s * 2), S::addpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(xq.add(s * 3), S::subpz2(s04_mj_s26, w8_s15_mj_s37));
-        S::setpz2(xq.add(s * 4), S::subpz2(a04_p1_a26, a15_p1_a37));
-        S::setpz2(xq.add(s * 5), S::subpz2(s04_pj_s26, v8_s15_pj_s37));
-        S::setpz2(xq.add(s * 6), S::subpz2(a04_m1_a26, j_a15_m1_a37));
-        S::setpz2(xq.add(s * 7), S::addpz2(s04_mj_s26, w8_s15_mj_s37));
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    pub static DIT8_FMA = Fft {
+        core_1: core_x2::<AvxX2>,
+        native: FmaX2,
+        x1: FmaX1,
+    };
+}
 
-        q += 2;
+pub(crate) fn runtime_fft() -> crate::FftImpl {
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    if is_x86_feature_detected!("fma") {
+        return DIT8_FMA;
+    } else if is_x86_feature_detected!("avx") {
+        return DIT8_AVX;
     }
+
+    DIT8_SCALAR
 }
-
-#[inline(always)]
-pub(crate) unsafe fn invend_8_1<S: FftSimd16>(
-    n: usize,
-    s: usize,
-    eo: bool,
-    x: *mut c64,
-    y: *mut c64,
-) {
-    debug_assert_eq!(n, 8);
-    debug_assert_eq!(s, 1);
-
-    let z = if eo { y } else { x };
-
-    let z0 = S::getpz(&*z.add(0));
-    let z1 = S::getpz(&*z.add(1));
-    let z2 = S::getpz(&*z.add(2));
-    let z3 = S::getpz(&*z.add(3));
-    let z4 = S::getpz(&*z.add(4));
-    let z5 = S::getpz(&*z.add(5));
-    let z6 = S::getpz(&*z.add(6));
-    let z7 = S::getpz(&*z.add(7));
-    let a04 = S::addpz(z0, z4);
-    let s04 = S::subpz(z0, z4);
-    let a26 = S::addpz(z2, z6);
-    let js26 = S::jxpz(S::subpz(z2, z6));
-    let a15 = S::addpz(z1, z5);
-    let s15 = S::subpz(z1, z5);
-    let a37 = S::addpz(z3, z7);
-    let js37 = S::jxpz(S::subpz(z3, z7));
-    let a04_p1_a26 = S::addpz(a04, a26);
-    let s04_pj_s26 = S::addpz(s04, js26);
-    let a04_m1_a26 = S::subpz(a04, a26);
-    let s04_mj_s26 = S::subpz(s04, js26);
-    let a15_p1_a37 = S::addpz(a15, a37);
-    let v8_s15_pj_s37 = S::v8xpz(S::addpz(s15, js37));
-    let j_a15_m1_a37 = S::jxpz(S::subpz(a15, a37));
-    let w8_s15_mj_s37 = S::w8xpz(S::subpz(s15, js37));
-    S::setpz(x.add(0), S::addpz(a04_p1_a26, a15_p1_a37));
-    S::setpz(x.add(1), S::addpz(s04_pj_s26, v8_s15_pj_s37));
-    S::setpz(x.add(2), S::addpz(a04_m1_a26, j_a15_m1_a37));
-    S::setpz(x.add(3), S::subpz(s04_mj_s26, w8_s15_mj_s37));
-    S::setpz(x.add(4), S::subpz(a04_p1_a26, a15_p1_a37));
-    S::setpz(x.add(5), S::subpz(s04_pj_s26, v8_s15_pj_s37));
-    S::setpz(x.add(6), S::subpz(a04_m1_a26, j_a15_m1_a37));
-    S::setpz(x.add(7), S::addpz(s04_mj_s26, w8_s15_mj_s37));
-}
-
-/// Initialize twiddles for subsequent forward and inverse Fourier transforms of size `n`.
-/// `twiddles` must be of length `2*n`.
-pub fn init_twiddles(forward: bool, n: usize, twiddles: &mut [c64]) {
-    crate::dif8::init_twiddles(forward, n, twiddles);
-}
-
-include!(concat!(env!("OUT_DIR"), "/dit8.rs"));
-include!("./boilerplate.rs");

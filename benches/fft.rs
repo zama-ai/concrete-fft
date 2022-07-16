@@ -105,23 +105,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let mut planner = FftPlannerAvx::<f64>::new().unwrap();
 
             let fwd_rustfft = planner.plan_fft_forward(n);
-            let inv_rustfft = planner.plan_fft_inverse(n);
             let mut scratch = [];
 
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
-            let inv_fftw = PlanInterleavedC64::new(n, Sign::Backward);
 
             let bench_duration = std::time::Duration::from_millis(100);
-            let fwd_binfft = binfft::Plan::new(
-                n,
-                binfft::Method::Measure(bench_duration),
-                binfft::Direction::Forward,
-            );
-            let inv_binfft = binfft::Plan::new(
-                n,
-                binfft::Method::Measure(bench_duration),
-                binfft::Direction::Inverse,
-            );
+            let fwd_binfft = binfft::Plan::new(n, binfft::Method::Measure(bench_duration));
 
             {
                 let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
@@ -147,33 +136,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
 
                 c.bench_function(&format!("binfft-fwd-{}", n), |b| {
-                    b.iter(|| fwd_binfft.fft(&mut *dst, stack.rb_mut()))
-                });
-            }
-
-            {
-                let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-                let (mut src, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
-                c.bench_function(&format!("rustfft-inv-{}", n), |b| {
-                    b.iter(|| {
-                        inv_rustfft.process_outofplace_with_scratch(
-                            &mut src,
-                            &mut dst,
-                            &mut scratch,
-                        )
-                    })
-                });
-                c.bench_function(&format!("fftw-inv-{}", n), |b| {
-                    b.iter(|| {
-                        inv_fftw.execute(&mut src, &mut dst);
-                    })
-                });
-            }
-            {
-                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("binfft-inv-{}", n), |b| {
-                    b.iter(|| inv_binfft.fft(&mut *dst, stack.rb_mut()))
+                    b.iter(|| fwd_binfft.fwd(&mut *dst, stack.rb_mut()))
                 });
             }
         }

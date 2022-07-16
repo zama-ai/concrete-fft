@@ -9,7 +9,6 @@ edition = "2021"
 num-complex = "0.4"
 lazy_static = "1.4"
 dyn-stack = "0.3"
-seq-macro = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"
