@@ -7,8 +7,11 @@ edition = "2021"
 
 [dependencies]
 num-complex = "0.4"
-lazy_static = "1.4"
 dyn-stack = "0.3"
+
+[features]
+default = []
+nightly = []
 
 [dev-dependencies]
 criterion = "0.3"

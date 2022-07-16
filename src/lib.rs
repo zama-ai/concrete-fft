@@ -1,4 +1,5 @@
 #![allow(clippy::erasing_op, clippy::identity_op)]
+#![cfg_attr(feature = "nightly", feature(stdsimd, avx512_target_feature))]
 
 use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut, SizeOverflow, StackReq};
 use num_complex::Complex32;
@@ -198,6 +199,7 @@ fn measure_fastest(min_bench_duration_per_algo: Duration, n: usize) -> FftAlgo {
             duration_div_f64(duration, n_runs as f64)
         };
     }
+    dbg!(&avg_durations);
 
     let best_time = avg_durations.iter().min().unwrap();
     let best_index = avg_durations
@@ -346,6 +348,12 @@ mod tests {
                 (is_x86_feature_detected!("fma"), 8, &DIT8_FMA),
                 #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
                 (is_x86_feature_detected!("fma"), 16, &DIT16_FMA),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 4, &DIT4_AVX512),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 8, &DIT8_AVX512),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 16, &DIT16_AVX512),
                 (true, 2, &DIF2_SCALAR),
                 (true, 4, &DIF4_SCALAR),
                 (true, 8, &DIF8_SCALAR),
@@ -366,6 +374,12 @@ mod tests {
                 (is_x86_feature_detected!("fma"), 8, &DIF8_FMA),
                 #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
                 (is_x86_feature_detected!("fma"), 16, &DIF16_FMA),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 4, &DIF4_AVX512),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 8, &DIF8_AVX512),
+                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+                (is_x86_feature_detected!("avx512f"), 16, &DIF16_AVX512),
             ] {
                 if can_run {
                     for exp in 1..17 {

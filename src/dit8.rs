@@ -231,6 +231,7 @@ macro_rules! dit8_impl {
                 core_1: $core1______: expr,
                 native: $xn: ty,
                 x1: $x1: ty,
+                $(target: $target: tt,)?
             };
         )*
     ) => {
@@ -246,61 +247,75 @@ macro_rules! dit8_impl {
             #[allow(dead_code)]
             $(#[$attr])*
             impl $fft {
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_00<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {}
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_01<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$x1>(FWD, 1 << 1, 1 << 0, x, y, false);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_02<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_4::<$x1>(FWD, 1 << 2, 1 << 0, x, y, false);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_03<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_8::<$x1>(FWD, 1 << 3, 1 << 0, x, y, false);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_04<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$xn>(FWD, 1 << 1, 1 << 3, y, x, true);
                     $core1______(FWD, 1 << 4, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_05<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_4::<$xn>(FWD, 1 << 2, 1 << 3, y, x, true);
                     $core1______(FWD, 1 << 5, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_06<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_8::<$xn>(FWD, 1 << 3, 1 << 3, y, x, true);
                     $core1______(FWD, 1 << 6, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_07<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$xn>(FWD, 1 << 1, 1 << 6, x, y, false);
                     core_::<$xn>(FWD, 1 << 4, 1 << 3, y, x, w);
                     $core1______(FWD, 1 << 7, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_08<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_4::<$xn>(FWD, 1 << 2, 1 << 6, x, y, false);
                     core_::<$xn>(FWD, 1 << 5, 1 << 3, y, x, w);
                     $core1______(FWD, 1 << 8, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_09<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_8::<$xn>(FWD, 1 << 3, 1 << 6, x, y, false);
                     core_::<$xn>(FWD, 1 << 6, 1 << 3, y, x, w);
                     $core1______(FWD, 1 << 9, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_10<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$xn>(FWD, 1 << 01, 1 << 9, y, x, true);
                     core_::<$xn>(FWD, 1 << 04, 1 << 6, x, y, w);
                     core_::<$xn>(FWD, 1 << 07, 1 << 3, y, x, w);
                     $core1______(FWD, 1 << 10, 1 << 0, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_11<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_4::<$xn>(FWD, 1 << 02, 1 << 09, y, x, true);
                     core_::<$xn>(FWD, 1 << 05, 1 << 06, x, y, w);
                     core_::<$xn>(FWD, 1 << 08, 1 << 03, y, x, w);
                     $core1______(FWD, 1 << 11, 1 << 00, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_12<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_8::<$xn>(FWD, 1 << 03, 1 << 09, y, x, true);
                     core_::<$xn>(FWD, 1 << 06, 1 << 06, x, y, w);
                     core_::<$xn>(FWD, 1 << 09, 1 << 03, y, x, w);
                     $core1______(FWD, 1 << 12, 1 << 00, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_13<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$xn>(FWD, 1 << 01, 1 << 12, x, y, false);
                     core_::<$xn>(FWD, 1 << 04, 1 << 09, y, x, w);
@@ -308,6 +323,7 @@ macro_rules! dit8_impl {
                     core_::<$xn>(FWD, 1 << 10, 1 << 03, y, x, w);
                     $core1______(FWD, 1 << 13, 1 << 00, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_14<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_4::<$xn>(FWD, 1 << 02, 1 << 12, x, y, false);
                     core_::<$xn>(FWD, 1 << 05, 1 << 09, y, x, w);
@@ -315,6 +331,7 @@ macro_rules! dit8_impl {
                     core_::<$xn>(FWD, 1 << 11, 1 << 03, y, x, w);
                     $core1______(FWD, 1 << 14, 1 << 00, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_15<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_8::<$xn>(FWD, 1 << 03, 1 << 12, x, y, false);
                     core_::<$xn>(FWD, 1 << 06, 1 << 09, y, x, w);
@@ -322,6 +339,7 @@ macro_rules! dit8_impl {
                     core_::<$xn>(FWD, 1 << 12, 1 << 03, y, x, w);
                     $core1______(FWD, 1 << 15, 1 << 00, x, y, w);
                 }
+                $(#[target_feature(enable = $target)])?
                 unsafe fn fft_16<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
                     end_2::<$xn>(FWD, 1 << 01, 1 << 15, y, x, true);
                     core_::<$xn>(FWD, 1 << 04, 1 << 12, x, y, w);
@@ -391,17 +409,32 @@ dit8_impl! {
         core_1: core_x2::<AvxX2>,
         native: AvxX2,
         x1: AvxX1,
+        target: "avx",
     };
 
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     pub static DIT8_FMA = Fft {
-        core_1: core_x2::<AvxX2>,
+        core_1: core_x2::<FmaX2>,
         native: FmaX2,
         x1: FmaX1,
+        target: "fma",
+    };
+
+    #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+    pub static DIT8_AVX512 = Fft {
+        core_1: core_x2::<Avx512X2>,
+        native: Avx512X4,
+        x1: Avx512X1,
+        target: "avx512f",
     };
 }
 
 pub(crate) fn runtime_fft() -> crate::FftImpl {
+    #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
+    if is_x86_feature_detected!("avx512f") {
+        return DIT8_AVX512;
+    }
+
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     if is_x86_feature_detected!("fma") {
         return DIT8_FMA;
