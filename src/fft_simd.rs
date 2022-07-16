@@ -1,9 +1,12 @@
 use crate::c64;
 use core::fmt::Debug;
 use core::mem::transmute;
+use hexf::hexf64;
 
-const H1X: f64 = 0.923879532511286762010323247995557949;
-const H1Y: f64 = -0.382683432365089757574419179753100195;
+// cos(-pi/8)
+pub const H1X: f64 = hexf64!("0x0.ec835e79946a3p0");
+// sin(-pi/8)
+pub const H1Y: f64 = hexf64!("0x0.61f78a9abaa59p0") * -1.0;
 
 pub trait FftSimd64 {
     type Reg: Copy + Debug;
@@ -164,13 +167,71 @@ pub unsafe fn twid_t(r: usize, big_n: usize, k: usize, w: *const c64, p: usize) 
     &*w.add(r * p + (big_n + k))
 }
 
-pub fn init_wt(forward: bool, r: usize, big_n: usize, w: &mut [c64]) {
+// https://stackoverflow.com/a/42792940
+fn sincospi64(mut a: f64) -> (f64, f64) {
+    let fma = f64::mul_add;
+
+    // must be evaluated with IEEE-754 semantics
+    let az = a * 0.0;
+
+    // for |a| >= 2**53, cospi(a) = 1.0, but cospi(Inf) = NaN
+    a = if a.abs() < hexf64!("0x1.0p53") { a } else { az };
+
+    // reduce argument to primary approximation interval (-0.25, 0.25)
+    let mut r = (a + a).round();
+    let i = r as i64;
+    let t = f64::mul_add(-0.5, r, a);
+
+    // compute core approximations
+    let s = t * t;
+
+    // approximate cos(pi*x) for x in [-0.25,0.25]
+
+    r = -1.0369917389758117e-4;
+    r = fma(r, s, 1.9294935641298806e-3);
+    r = fma(r, s, -2.5806887942825395e-2);
+    r = fma(r, s, 2.3533063028328211e-1);
+    r = fma(r, s, -1.3352627688538006e+0);
+    r = fma(r, s, 4.0587121264167623e+0);
+    r = fma(r, s, -4.9348022005446790e+0);
+    let mut c = fma(r, s, 1.0000000000000000e+0);
+
+    // approximate sin(pi*x) for x in [-0.25,0.25]
+    r = 4.6151442520157035e-4;
+    r = fma(r, s, -7.3700183130883555e-3);
+    r = fma(r, s, 8.2145868949323936e-2);
+    r = fma(r, s, -5.9926452893214921e-1);
+    r = fma(r, s, 2.5501640398732688e+0);
+    r = fma(r, s, -5.1677127800499516e+0);
+    let s = s * t;
+    r = r * s;
+
+    let mut s = fma(t, 3.1415926535897931e+0, r);
+    // map results according to quadrant
+
+    if (i & 2) != 0 {
+        s = 0.0 - s; // must be evaluated with IEEE-754 semantics
+        c = 0.0 - c; // must be evaluated with IEEE-754 semantics
+    }
+    if (i & 1) != 0 {
+        let t = 0.0 - s; // must be evaluated with IEEE-754 semantics
+        s = c;
+        c = t;
+    }
+    // IEEE-754: sinPi(+n) is +0 and sinPi(-n) is -0 for positive integers n
+    if a == a.floor() {
+        s = az
+    }
+    (s, c)
+}
+
+pub fn init_wt(r: usize, big_n: usize, w: &mut [c64], w_inv: &mut [c64]) {
     if big_n < r {
         return;
     }
 
     let nr = big_n / r;
-    let theta = -2.0 * core::f64::consts::PI / big_n as f64;
+    let theta = -2.0 / big_n as f64;
 
     for i in 0..2 * big_n {
         w[i].re = f64::NAN;
@@ -179,10 +240,12 @@ pub fn init_wt(forward: bool, r: usize, big_n: usize, w: &mut [c64]) {
 
     for p in 0..nr {
         for k in 1..r {
-            let (s, c) = (theta * (k * p) as f64).sin_cos();
-            let z = c64::new(c, if forward { s } else { -s });
+            let (s, c) = sincospi64(theta * (k * p) as f64);
+            let z = c64::new(c, s);
             w[p + (k - 1) * nr] = z;
             w[big_n + r * p + k] = z;
+            w_inv[p + (k - 1) * nr] = z.conj();
+            w_inv[big_n + r * p + k] = z.conj();
         }
     }
 }

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 num-complex = "0.4"
 dyn-stack = "0.3"
+hexf = "0.2.1"
 
 [features]
 default = []

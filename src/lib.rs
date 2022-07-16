@@ -265,8 +265,7 @@ impl Plan {
             Dif8 | Dit8 => 8,
             Dif16 | Dit16 => 16,
         };
-        fft_simd::init_wt(true, r, n, &mut *twiddles);
-        fft_simd::init_wt(false, r, n, &mut *twiddles_inv);
+        fft_simd::init_wt(r, n, &mut *twiddles, &mut *twiddles_inv);
         Self {
             fwd,
             inv,
@@ -390,8 +389,7 @@ mod tests {
                         let mut twiddles = vec![c64::default(); 2 * n];
                         let mut twiddles_inv = vec![c64::default(); 2 * n];
 
-                        init_wt(true, r, n, &mut twiddles);
-                        init_wt(false, r, n, &mut twiddles_inv);
+                        init_wt(r, n, &mut twiddles, &mut twiddles_inv);
 
                         let mut x = vec![c64::default(); n];
                         for z in &mut x {
@@ -410,7 +408,7 @@ mod tests {
                             plan.process(&mut y);
 
                             for (z_expected, z_actual) in y.iter().zip(&x) {
-                                assert!((*z_expected - *z_actual).abs() < 1e-9);
+                                assert!((*z_expected - *z_actual).abs() < 1e-12);
                             }
                         }
 
@@ -421,7 +419,7 @@ mod tests {
                         }
 
                         for (z_expected, z_actual) in orig.iter().zip(&x) {
-                            assert!((*z_expected - *z_actual).abs() < 1e-12);
+                            assert!((*z_expected - *z_actual).abs() < 1e-14);
                         }
                     }
                 }
