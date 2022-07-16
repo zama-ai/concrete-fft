@@ -110,7 +110,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
 
             let bench_duration = std::time::Duration::from_millis(100);
-            let fwd_binfft = binfft::Plan::new(n, binfft::Method::Measure(bench_duration));
+            let binfft = binfft::Plan::new(n, binfft::Method::Measure(bench_duration));
 
             {
                 let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
@@ -136,7 +136,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
 
                 c.bench_function(&format!("binfft-fwd-{}", n), |b| {
-                    b.iter(|| fwd_binfft.fwd(&mut *dst, stack.rb_mut()))
+                    b.iter(|| binfft.fwd(&mut *dst, stack.rb_mut()))
+                });
+            }
+            {
+                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
+
+                c.bench_function(&format!("binfft-inv-{}", n), |b| {
+                    b.iter(|| binfft.inv(&mut *dst, stack.rb_mut()))
                 });
             }
         }
