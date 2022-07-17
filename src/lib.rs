@@ -1,4 +1,9 @@
-#![allow(clippy::erasing_op, clippy::identity_op)]
+#![allow(
+    clippy::erasing_op,
+    clippy::identity_op,
+    clippy::zero_prefixed_literal,
+    clippy::excessive_precision
+)]
 #![cfg_attr(feature = "nightly", feature(stdsimd, avx512_target_feature))]
 
 use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut, SizeOverflow, StackReq};
@@ -221,7 +226,7 @@ impl std::fmt::Debug for Plan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Plan")
             .field("algo", &self.algo)
-            .field("length", &self.len())
+            .field("fft size", &self.fft_size())
             .finish()
     }
 }
@@ -275,7 +280,7 @@ impl Plan {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn fft_size(&self) -> usize {
         self.twiddles.len() / 2
     }
 
@@ -284,11 +289,11 @@ impl Plan {
     }
 
     pub fn fft_scratch(&self) -> Result<StackReq, SizeOverflow> {
-        StackReq::try_new_aligned::<c64>(self.len(), 64)
+        StackReq::try_new_aligned::<c64>(self.fft_size(), 64)
     }
 
     pub fn fwd(&self, buf: &mut [c64], stack: DynStack) {
-        let n = self.len();
+        let n = self.fft_size();
         assert_eq!(n, buf.len());
         let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, 64);
         let buf = buf.as_mut_ptr();
@@ -297,7 +302,7 @@ impl Plan {
     }
 
     pub fn inv(&self, buf: &mut [c64], stack: DynStack) {
-        let n = self.len();
+        let n = self.fft_size();
         assert_eq!(n, buf.len());
         let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, 64);
         let buf = buf.as_mut_ptr();

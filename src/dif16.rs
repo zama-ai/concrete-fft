@@ -221,6 +221,7 @@ unsafe fn core_<I: FftSimd64>(
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 unsafe fn core_x2<I: FftSimd64X2>(
     fwd: bool,
     n: usize,
@@ -420,6 +421,7 @@ unsafe fn core_x2<I: FftSimd64X2>(
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
     fwd: bool,
     n: usize,

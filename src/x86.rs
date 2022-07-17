@@ -1,5 +1,5 @@
 use crate::c64;
-use crate::fft_simd::{FftSimd64, FftSimd64X2, FftSimd64X4};
+use crate::fft_simd::{FftSimd64, FftSimd64X2};
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
@@ -354,7 +354,7 @@ impl FftSimd64X2 for Avx512X2 {
 }
 
 #[cfg(feature = "nightly")]
-impl FftSimd64X4 for Avx512X4 {
+impl crate::fft_simd::FftSimd64X4 for Avx512X4 {
     #[inline(always)]
     unsafe fn transpose(
         r0: Self::Reg,

@@ -213,7 +213,7 @@ fn sincospi64(mut a: f64) -> (f64, f64) {
     r = fma(r, s, 2.5501640398732688e+0);
     r = fma(r, s, -5.1677127800499516e+0);
     let s = s * t;
-    r = r * s;
+    r *= s;
 
     let mut s = fma(t, 3.1415926535897931e+0, r);
     // map results according to quadrant
@@ -242,9 +242,9 @@ pub fn init_wt(r: usize, big_n: usize, w: &mut [c64], w_inv: &mut [c64]) {
     let nr = big_n / r;
     let theta = -2.0 / big_n as f64;
 
-    for i in 0..2 * big_n {
-        w[i].re = f64::NAN;
-        w[i].im = f64::NAN;
+    for wi in w.iter_mut() {
+        wi.re = f64::NAN;
+        wi.im = f64::NAN;
     }
 
     for p in 0..nr {
