@@ -380,7 +380,7 @@ mod tests {
                 (is_x86_feature_detected!("avx512f"), 16, &DIF16_AVX512),
             ] {
                 if can_run {
-                    for exp in 1..17 {
+                    for exp in 0..17 {
                         let n: usize = 1 << exp;
                         let fwd = arr.fwd[n.trailing_zeros() as usize];
                         let inv = arr.inv[n.trailing_zeros() as usize];

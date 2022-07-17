@@ -1,7 +1,7 @@
 use crate::c64;
 use crate::dif2::end_2;
 use crate::dif4::end_4;
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, FftSimd64X4, Scalar};
 
 #[inline(always)]
 #[rustfmt::skip]
@@ -92,7 +92,6 @@ unsafe fn core_x2<I: FftSimd64X2>(
     w: *const c64,
 ) {
     debug_assert_eq!(s, 1);
-    debug_assert_eq!(I::COMPLEX_PER_REG, 2);
 
     let big_n = n;
     let big_n0 = 0;
@@ -104,6 +103,7 @@ unsafe fn core_x2<I: FftSimd64X2>(
     let big_n6 = big_n1 * 6;
     let big_n7 = big_n1 * 7;
 
+    debug_assert_eq!(big_n1 % 2, 0);
     let mut p = 0;
     while p < big_n1 {
         let x_p = x.add(p);
@@ -175,6 +175,95 @@ unsafe fn core_x2<I: FftSimd64X2>(
         }
 
         p += 2;
+    }
+}
+
+#[inline(always)]
+unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
+    debug_assert_eq!(s, 1);
+    if n == 16 {
+        return core_x2::<I2>(fwd, n, s, x, y, w);
+    }
+
+    let big_n = n;
+    let big_n0 = 0;
+    let big_n1 = big_n / 8;
+    let big_n2 = big_n1 * 2;
+    let big_n3 = big_n1 * 3;
+    let big_n4 = big_n1 * 4;
+    let big_n5 = big_n1 * 5;
+    let big_n6 = big_n1 * 6;
+    let big_n7 = big_n1 * 7;
+
+    debug_assert_eq!(big_n1 % 4, 0);
+    let mut p = 0;
+    while p < big_n1 {
+        let x_p = x.add(p);
+        let y_8p = y.add(8 * p);
+
+        let x0 = I4::load(x_p.add(big_n0));
+        let x1 = I4::load(x_p.add(big_n1));
+        let x2 = I4::load(x_p.add(big_n2));
+        let x3 = I4::load(x_p.add(big_n3));
+        let x4 = I4::load(x_p.add(big_n4));
+        let x5 = I4::load(x_p.add(big_n5));
+        let x6 = I4::load(x_p.add(big_n6));
+        let x7 = I4::load(x_p.add(big_n7));
+
+        let a04 = I4::add(x0, x4);
+        let s04 = I4::sub(x0, x4);
+        let a26 = I4::add(x2, x6);
+        let js26 = I4::xpj(fwd, I4::sub(x2, x6));
+        let a15 = I4::add(x1, x5);
+        let s15 = I4::sub(x1, x5);
+        let a37 = I4::add(x3, x7);
+        let js37 = I4::xpj(fwd, I4::sub(x3, x7));
+
+        let a04_p1_a26 = I4::add(a04, a26);
+        let s04_mj_s26 = I4::sub(s04, js26);
+        let a04_m1_a26 = I4::sub(a04, a26);
+        let s04_pj_s26 = I4::add(s04, js26);
+        let a15_p1_a37 = I4::add(a15, a37);
+        let w8_s15_mj_s37 = I4::xw8(fwd, I4::sub(s15, js37));
+        let j_a15_m1_a37 = I4::xpj(fwd, I4::sub(a15, a37));
+        let v8_s15_pj_s37 = I4::xv8(fwd, I4::add(s15, js37));
+
+        let w1p = I4::load(twid(8, big_n, 1, w, p));
+        let w2p = I4::load(twid(8, big_n, 2, w, p));
+        let w3p = I4::load(twid(8, big_n, 3, w, p));
+        let w4p = I4::load(twid(8, big_n, 4, w, p));
+        let w5p = I4::load(twid(8, big_n, 5, w, p));
+        let w6p = I4::load(twid(8, big_n, 6, w, p));
+        let w7p = I4::load(twid(8, big_n, 7, w, p));
+
+        let a = I4::add(a04_p1_a26, a15_p1_a37);
+        let b = I4::mul(w1p, I4::add(s04_mj_s26, w8_s15_mj_s37));
+        let c = I4::mul(w2p, I4::sub(a04_m1_a26, j_a15_m1_a37));
+        let d = I4::mul(w3p, I4::sub(s04_pj_s26, v8_s15_pj_s37));
+        let e = I4::mul(w4p, I4::sub(a04_p1_a26, a15_p1_a37));
+        let f = I4::mul(w5p, I4::sub(s04_mj_s26, w8_s15_mj_s37));
+        let g = I4::mul(w6p, I4::add(a04_m1_a26, j_a15_m1_a37));
+        let h = I4::mul(w7p, I4::add(s04_pj_s26, v8_s15_pj_s37));
+
+        let (abcd0, abcd1, abcd2, abcd3) = I4::transpose(a, b, c, d);
+        let (efgh0, efgh1, efgh2, efgh3) = I4::transpose(e, f, g, h);
+        I4::store(y_8p.add(0), abcd0);
+        I4::store(y_8p.add(4), efgh0);
+        I4::store(y_8p.add(8), abcd1);
+        I4::store(y_8p.add(12), efgh1);
+        I4::store(y_8p.add(16), abcd2);
+        I4::store(y_8p.add(20), efgh2);
+        I4::store(y_8p.add(24), abcd3);
+        I4::store(y_8p.add(28), efgh3);
+
+        p += 4;
     }
 }
 
@@ -436,7 +525,7 @@ dif8_impl! {
 
     #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
     pub static DIF8_AVX512 = Fft {
-        core_1: core_x2::<Avx512X2>,
+        core_1: core_x4::<Avx512X2, Avx512X4>,
         native: Avx512X4,
         x1: Avx512X1,
         target: "avx512f",

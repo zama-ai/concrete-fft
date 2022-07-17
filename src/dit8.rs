@@ -1,6 +1,6 @@
 use crate::c64;
 use crate::dit4::{end_2, end_4};
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, FftSimd64X4, Scalar};
 
 #[inline(always)]
 #[rustfmt::skip]
@@ -164,6 +164,97 @@ unsafe fn core_x2<I: FftSimd64X2>(
         I::store(x_p.add(big_n7), I::add(s04_pj_s26, v8_s15_pj_s37));
 
         p += 2;
+    }
+}
+
+#[inline(always)]
+unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
+    debug_assert_eq!(s, 1);
+    if n == 16 {
+        return core_x2::<I2>(fwd, n, s, x, y, w);
+    }
+
+    let big_n = n;
+    let big_n0 = 0;
+    let big_n1 = big_n / 8;
+    let big_n2 = big_n1 * 2;
+    let big_n3 = big_n1 * 3;
+    let big_n4 = big_n1 * 4;
+    let big_n5 = big_n1 * 5;
+    let big_n6 = big_n1 * 6;
+    let big_n7 = big_n1 * 7;
+
+    let mut p = 0;
+    while p < big_n1 {
+        let x_p = x.add(p);
+        let y_8p = y.add(8 * p);
+
+        let w1p = I4::load(twid(8, big_n, 1, w, p));
+        let w2p = I4::load(twid(8, big_n, 2, w, p));
+        let w3p = I4::load(twid(8, big_n, 3, w, p));
+        let w4p = I4::load(twid(8, big_n, 4, w, p));
+        let w5p = I4::load(twid(8, big_n, 5, w, p));
+        let w6p = I4::load(twid(8, big_n, 6, w, p));
+        let w7p = I4::load(twid(8, big_n, 7, w, p));
+
+        let abcd_0 = I4::load(y_8p.add(0));
+        let efgh_0 = I4::load(y_8p.add(4));
+        let abcd_1 = I4::load(y_8p.add(8));
+        let efgh_1 = I4::load(y_8p.add(12));
+        let abcd_2 = I4::load(y_8p.add(16));
+        let efgh_2 = I4::load(y_8p.add(20));
+        let abcd_3 = I4::load(y_8p.add(24));
+        let efgh_3 = I4::load(y_8p.add(28));
+
+        let (a, b, c, d) = I4::transpose(abcd_0, abcd_1, abcd_2, abcd_3);
+        let (e, f, g, h) = I4::transpose(efgh_0, efgh_1, efgh_2, efgh_3);
+
+        let y0 = a;
+        let y1 = I4::mul(w1p, b);
+        let y2 = I4::mul(w2p, c);
+        let y3 = I4::mul(w3p, d);
+        let y4 = I4::mul(w4p, e);
+        let y5 = I4::mul(w5p, f);
+        let y6 = I4::mul(w6p, g);
+        let y7 = I4::mul(w7p, h);
+
+        let a04 = I4::add(y0, y4);
+        let s04 = I4::sub(y0, y4);
+        let a26 = I4::add(y2, y6);
+        let js26 = I4::xpj(fwd, I4::sub(y2, y6));
+        let a15 = I4::add(y1, y5);
+        let s15 = I4::sub(y1, y5);
+        let a37 = I4::add(y3, y7);
+        let js37 = I4::xpj(fwd, I4::sub(y3, y7));
+
+        let a04_p1_a26 = I4::add(a04, a26);
+        let a15_p1_a37 = I4::add(a15, a37);
+        I4::store(x_p.add(big_n0), I4::add(a04_p1_a26, a15_p1_a37));
+        I4::store(x_p.add(big_n4), I4::sub(a04_p1_a26, a15_p1_a37));
+
+        let s04_mj_s26 = I4::sub(s04, js26);
+        let w8_s15_mj_s37 = I4::xw8(fwd, I4::sub(s15, js37));
+        I4::store(x_p.add(big_n1), I4::add(s04_mj_s26, w8_s15_mj_s37));
+        I4::store(x_p.add(big_n5), I4::sub(s04_mj_s26, w8_s15_mj_s37));
+
+        let a04_m1_a26 = I4::sub(a04, a26);
+        let j_a15_m1_a37 = I4::xpj(fwd, I4::sub(a15, a37));
+        I4::store(x_p.add(big_n2), I4::sub(a04_m1_a26, j_a15_m1_a37));
+        I4::store(x_p.add(big_n6), I4::add(a04_m1_a26, j_a15_m1_a37));
+
+        let s04_pj_s26 = I4::add(s04, js26);
+        let v8_s15_pj_s37 = I4::xv8(fwd, I4::add(s15, js37));
+        I4::store(x_p.add(big_n3), I4::sub(s04_pj_s26, v8_s15_pj_s37));
+        I4::store(x_p.add(big_n7), I4::add(s04_pj_s26, v8_s15_pj_s37));
+
+        p += 4;
     }
 }
 
@@ -422,7 +513,7 @@ dit8_impl! {
 
     #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
     pub static DIT8_AVX512 = Fft {
-        core_1: core_x2::<Avx512X2>,
+        core_1: core_x4::<Avx512X2, Avx512X4>,
         native: Avx512X4,
         x1: Avx512X1,
         target: "avx512f",

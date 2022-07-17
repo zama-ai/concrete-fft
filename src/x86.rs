@@ -1,5 +1,5 @@
 use crate::c64;
-use crate::fft_simd::{FftSimd64, FftSimd64X2};
+use crate::fft_simd::{FftSimd64, FftSimd64X2, FftSimd64X4};
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
@@ -350,5 +350,28 @@ impl FftSimd64X2 for Avx512X2 {
     reimpl! { as AvxX2:
         unsafe fn catlo(a: Self::Reg, b: Self::Reg) -> Self::Reg;
         unsafe fn cathi(a: Self::Reg, b: Self::Reg) -> Self::Reg;
+    }
+}
+
+#[cfg(feature = "nightly")]
+impl FftSimd64X4 for Avx512X4 {
+    #[inline(always)]
+    unsafe fn transpose(
+        r0: Self::Reg,
+        r1: Self::Reg,
+        r2: Self::Reg,
+        r3: Self::Reg,
+    ) -> (Self::Reg, Self::Reg, Self::Reg, Self::Reg) {
+        let t0 = _mm512_shuffle_f64x2::<0b10001000>(r0, r1);
+        let t1 = _mm512_shuffle_f64x2::<0b11011101>(r0, r1);
+        let t2 = _mm512_shuffle_f64x2::<0b10001000>(r2, r3);
+        let t3 = _mm512_shuffle_f64x2::<0b11011101>(r2, r3);
+
+        let s0 = _mm512_shuffle_f64x2::<0b10001000>(t0, t2);
+        let s1 = _mm512_shuffle_f64x2::<0b11011101>(t0, t2);
+        let s2 = _mm512_shuffle_f64x2::<0b10001000>(t1, t3);
+        let s3 = _mm512_shuffle_f64x2::<0b11011101>(t1, t3);
+
+        (s0, s2, s1, s3)
     }
 }

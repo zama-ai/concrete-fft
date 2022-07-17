@@ -92,6 +92,15 @@ pub trait FftSimd64X2: FftSimd64 {
     unsafe fn cathi(a: Self::Reg, b: Self::Reg) -> Self::Reg;
 }
 
+pub trait FftSimd64X4: FftSimd64 {
+    unsafe fn transpose(
+        a: Self::Reg,
+        b: Self::Reg,
+        c: Self::Reg,
+        d: Self::Reg,
+    ) -> (Self::Reg, Self::Reg, Self::Reg, Self::Reg);
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Scalar;
 

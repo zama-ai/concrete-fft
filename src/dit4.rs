@@ -1,5 +1,5 @@
 use crate::c64;
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, FftSimd64X4, Scalar};
 
 #[inline(always)]
 unsafe fn core_<I: FftSimd64>(
@@ -69,6 +69,7 @@ unsafe fn core_x2<I: FftSimd64X2>(
     let big_n2 = big_n1 * 2;
     let big_n3 = big_n1 * 3;
 
+    debug_assert_eq!(big_n1 % 2, 0);
     let mut p = 0;
     while p < big_n1 {
         let x_p = x.add(p);
@@ -99,6 +100,62 @@ unsafe fn core_x2<I: FftSimd64X2>(
         I::store(x_p.add(big_n3), I::add(amc, jbmd));
 
         p += 2;
+    }
+}
+
+#[inline(always)]
+unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
+    debug_assert_eq!(s, 1);
+    if n == 8 {
+        return core_x2::<I2>(fwd, n, s, x, y, w);
+    }
+
+    let big_n = n;
+    let big_n0 = 0;
+    let big_n1 = big_n / 4;
+    let big_n2 = big_n1 * 2;
+    let big_n3 = big_n1 * 3;
+
+    debug_assert_eq!(big_n1 % 4, 0);
+    let mut p = 0;
+    while p < big_n1 {
+        let x_p = x.add(p);
+        let y_4p = y.add(4 * p);
+
+        let w1p = I4::load(twid(4, big_n, 1, w, p));
+        let w2p = I4::load(twid(4, big_n, 2, w, p));
+        let w3p = I4::load(twid(4, big_n, 3, w, p));
+
+        let abcd0 = I4::load(y_4p.add(0));
+        let abcd1 = I4::load(y_4p.add(4));
+        let abcd2 = I4::load(y_4p.add(8));
+        let abcd3 = I4::load(y_4p.add(12));
+
+        let (a, b, c, d) = I4::transpose(abcd0, abcd1, abcd2, abcd3);
+
+        let a = a;
+        let b = I4::mul(w1p, b);
+        let c = I4::mul(w2p, c);
+        let d = I4::mul(w3p, d);
+
+        let apc = I4::add(a, c);
+        let amc = I4::sub(a, c);
+        let bpd = I4::add(b, d);
+        let jbmd = I4::xpj(fwd, I4::sub(b, d));
+
+        I4::store(x_p.add(big_n0), I4::add(apc, bpd));
+        I4::store(x_p.add(big_n1), I4::sub(amc, jbmd));
+        I4::store(x_p.add(big_n2), I4::sub(apc, bpd));
+        I4::store(x_p.add(big_n3), I4::add(amc, jbmd));
+
+        p += 4;
     }
 }
 
@@ -387,7 +444,7 @@ dit4_impl! {
 
     #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
     pub static DIT4_AVX512 = Fft {
-        core_1: core_x2::<Avx512X2>,
+        core_1: core_x4::<Avx512X2, Avx512X4>,
         native: Avx512X4,
         x1: Avx512X1,
         target: "avx512f",

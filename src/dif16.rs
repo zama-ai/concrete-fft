@@ -2,7 +2,7 @@ use crate::c64;
 use crate::dif2::end_2;
 use crate::dif4::end_4;
 use crate::dif8::end_8;
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, Scalar};
+use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, FftSimd64X4, Scalar};
 
 #[inline(always)]
 unsafe fn core_<I: FftSimd64>(
@@ -420,6 +420,197 @@ unsafe fn core_x2<I: FftSimd64X2>(
 }
 
 #[inline(always)]
+unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
+    fwd: bool,
+    n: usize,
+    s: usize,
+    x: *mut c64,
+    y: *mut c64,
+    w: *const c64,
+) {
+    debug_assert_eq!(s, 1);
+    if n == 32 {
+        return core_x2::<I2>(fwd, n, s, x, y, w);
+    }
+
+    let big_n = n;
+    let big_n0 = 0;
+    let big_n1 = big_n / 16;
+    let big_n2 = big_n1 * 2;
+    let big_n3 = big_n1 * 3;
+    let big_n4 = big_n1 * 4;
+    let big_n5 = big_n1 * 5;
+    let big_n6 = big_n1 * 6;
+    let big_n7 = big_n1 * 7;
+    let big_n8 = big_n1 * 8;
+    let big_n9 = big_n1 * 9;
+    let big_na = big_n1 * 10;
+    let big_nb = big_n1 * 11;
+    let big_nc = big_n1 * 12;
+    let big_nd = big_n1 * 13;
+    let big_ne = big_n1 * 14;
+    let big_nf = big_n1 * 15;
+
+    debug_assert_eq!(big_n1 % 4, 0);
+    let mut p = 0;
+    while p < big_n1 {
+        let x_p = x.add(p);
+        let y_16p = y.add(16 * p);
+
+        let x0 = I4::load(x_p.add(big_n0));
+        let x1 = I4::load(x_p.add(big_n1));
+        let x2 = I4::load(x_p.add(big_n2));
+        let x3 = I4::load(x_p.add(big_n3));
+        let x4 = I4::load(x_p.add(big_n4));
+        let x5 = I4::load(x_p.add(big_n5));
+        let x6 = I4::load(x_p.add(big_n6));
+        let x7 = I4::load(x_p.add(big_n7));
+        let x8 = I4::load(x_p.add(big_n8));
+        let x9 = I4::load(x_p.add(big_n9));
+        let xa = I4::load(x_p.add(big_na));
+        let xb = I4::load(x_p.add(big_nb));
+        let xc = I4::load(x_p.add(big_nc));
+        let xd = I4::load(x_p.add(big_nd));
+        let xe = I4::load(x_p.add(big_ne));
+        let xf = I4::load(x_p.add(big_nf));
+
+        let a08 = I4::add(x0, x8);
+        let s08 = I4::sub(x0, x8);
+        let a4c = I4::add(x4, xc);
+        let s4c = I4::sub(x4, xc);
+        let a2a = I4::add(x2, xa);
+        let s2a = I4::sub(x2, xa);
+        let a6e = I4::add(x6, xe);
+        let s6e = I4::sub(x6, xe);
+        let a19 = I4::add(x1, x9);
+        let s19 = I4::sub(x1, x9);
+        let a5d = I4::add(x5, xd);
+        let s5d = I4::sub(x5, xd);
+        let a3b = I4::add(x3, xb);
+        let s3b = I4::sub(x3, xb);
+        let a7f = I4::add(x7, xf);
+        let s7f = I4::sub(x7, xf);
+
+        let js4c = I4::xpj(fwd, s4c);
+        let js6e = I4::xpj(fwd, s6e);
+        let js5d = I4::xpj(fwd, s5d);
+        let js7f = I4::xpj(fwd, s7f);
+
+        let a08p1a4c = I4::add(a08, a4c);
+        let s08mjs4c = I4::sub(s08, js4c);
+        let a08m1a4c = I4::sub(a08, a4c);
+        let s08pjs4c = I4::add(s08, js4c);
+        let a2ap1a6e = I4::add(a2a, a6e);
+        let s2amjs6e = I4::sub(s2a, js6e);
+        let a2am1a6e = I4::sub(a2a, a6e);
+        let s2apjs6e = I4::add(s2a, js6e);
+        let a19p1a5d = I4::add(a19, a5d);
+        let s19mjs5d = I4::sub(s19, js5d);
+        let a19m1a5d = I4::sub(a19, a5d);
+        let s19pjs5d = I4::add(s19, js5d);
+        let a3bp1a7f = I4::add(a3b, a7f);
+        let s3bmjs7f = I4::sub(s3b, js7f);
+        let a3bm1a7f = I4::sub(a3b, a7f);
+        let s3bpjs7f = I4::add(s3b, js7f);
+
+        let w8_s2amjs6e = I4::xw8(fwd, s2amjs6e);
+        let j_a2am1a6e = I4::xpj(fwd, a2am1a6e);
+        let v8_s2apjs6e = I4::xv8(fwd, s2apjs6e);
+
+        let a08p1a4c_p1_a2ap1a6e = I4::add(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_pw_s2amjs6e = I4::add(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_mj_a2am1a6e = I4::sub(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_mv_s2apjs6e = I4::sub(s08pjs4c, v8_s2apjs6e);
+        let a08p1a4c_m1_a2ap1a6e = I4::sub(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_mw_s2amjs6e = I4::sub(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_pj_a2am1a6e = I4::add(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_pv_s2apjs6e = I4::add(s08pjs4c, v8_s2apjs6e);
+
+        let w8_s3bmjs7f = I4::xw8(fwd, s3bmjs7f);
+        let j_a3bm1a7f = I4::xpj(fwd, a3bm1a7f);
+        let v8_s3bpjs7f = I4::xv8(fwd, s3bpjs7f);
+
+        let a19p1a5d_p1_a3bp1a7f = I4::add(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_pw_s3bmjs7f = I4::add(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_mj_a3bm1a7f = I4::sub(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_mv_s3bpjs7f = I4::sub(s19pjs5d, v8_s3bpjs7f);
+        let a19p1a5d_m1_a3bp1a7f = I4::sub(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_mw_s3bmjs7f = I4::sub(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_pj_a3bm1a7f = I4::add(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_pv_s3bpjs7f = I4::add(s19pjs5d, v8_s3bpjs7f);
+
+        let h1_s19mjs5d_pw_s3bmjs7f = I4::xh1(fwd, s19mjs5d_pw_s3bmjs7f);
+        let w8_a19m1a5d_mj_a3bm1a7f = I4::xw8(fwd, a19m1a5d_mj_a3bm1a7f);
+        let h3_s19pjs5d_mv_s3bpjs7f = I4::xh3(fwd, s19pjs5d_mv_s3bpjs7f);
+        let j_a19p1a5d_m1_a3bp1a7f = I4::xpj(fwd, a19p1a5d_m1_a3bp1a7f);
+        let hd_s19mjs5d_mw_s3bmjs7f = I4::xhd(fwd, s19mjs5d_mw_s3bmjs7f);
+        let v8_a19m1a5d_pj_a3bm1a7f = I4::xv8(fwd, a19m1a5d_pj_a3bm1a7f);
+        let hf_s19pjs5d_pv_s3bpjs7f = I4::xhf(fwd, s19pjs5d_pv_s3bpjs7f);
+
+        let w1p = I4::load(twid(16, big_n, 1, w, p));
+        let w2p = I4::load(twid(16, big_n, 2, w, p));
+        let w3p = I4::load(twid(16, big_n, 3, w, p));
+        let w4p = I4::load(twid(16, big_n, 4, w, p));
+        let w5p = I4::load(twid(16, big_n, 5, w, p));
+        let w6p = I4::load(twid(16, big_n, 6, w, p));
+        let w7p = I4::load(twid(16, big_n, 7, w, p));
+        let w8p = I4::load(twid(16, big_n, 8, w, p));
+        let w9p = I4::load(twid(16, big_n, 9, w, p));
+        let wap = I4::load(twid(16, big_n, 10, w, p));
+        let wbp = I4::load(twid(16, big_n, 11, w, p));
+        let wcp = I4::load(twid(16, big_n, 12, w, p));
+        let wdp = I4::load(twid(16, big_n, 13, w, p));
+        let wep = I4::load(twid(16, big_n, 14, w, p));
+        let wfp = I4::load(twid(16, big_n, 15, w, p));
+
+        let a_ = I4::add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+        let b_ = I4::mul(w1p, I4::add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f));
+        let c_ = I4::mul(w2p, I4::add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f));
+        let d_ = I4::mul(w3p, I4::add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f));
+        let e_ = I4::mul(w4p, I4::sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f));
+        let f_ = I4::mul(w5p, I4::sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f));
+        let g_ = I4::mul(w6p, I4::sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f));
+        let h_ = I4::mul(w7p, I4::sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f));
+
+        let i_ = I4::mul(w8p, I4::sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f));
+        let j_ = I4::mul(w9p, I4::sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f));
+        let k_ = I4::mul(wap, I4::sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f));
+        let l_ = I4::mul(wbp, I4::sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f));
+        let m_ = I4::mul(wcp, I4::add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f));
+        let n_ = I4::mul(wdp, I4::add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f));
+        let o_ = I4::mul(wep, I4::add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f));
+        let p_ = I4::mul(wfp, I4::add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f));
+
+        let (abcd0, abcd1, abcd2, abcd3) = I4::transpose(a_, b_, c_, d_);
+        let (efgh0, efgh1, efgh2, efgh3) = I4::transpose(e_, f_, g_, h_);
+        let (ijkl0, ijkl1, ijkl2, ijkl3) = I4::transpose(i_, j_, k_, l_);
+        let (mnop0, mnop1, mnop2, mnop3) = I4::transpose(m_, n_, o_, p_);
+
+        I4::store(y_16p.add(0x00), abcd0);
+        I4::store(y_16p.add(0x04), efgh0);
+        I4::store(y_16p.add(0x08), ijkl0);
+        I4::store(y_16p.add(0x0c), mnop0);
+
+        I4::store(y_16p.add(0x10), abcd1);
+        I4::store(y_16p.add(0x14), efgh1);
+        I4::store(y_16p.add(0x18), ijkl1);
+        I4::store(y_16p.add(0x1c), mnop1);
+
+        I4::store(y_16p.add(0x20), abcd2);
+        I4::store(y_16p.add(0x24), efgh2);
+        I4::store(y_16p.add(0x28), ijkl2);
+        I4::store(y_16p.add(0x2c), mnop2);
+
+        I4::store(y_16p.add(0x30), abcd3);
+        I4::store(y_16p.add(0x34), efgh3);
+        I4::store(y_16p.add(0x38), ijkl3);
+        I4::store(y_16p.add(0x3c), mnop3);
+
+        p += 4;
+    }
+}
+
+#[inline(always)]
 pub(crate) unsafe fn end16<I: FftSimd64>(
     fwd: bool,
     n: usize,
@@ -786,7 +977,7 @@ dif16_impl! {
 
     #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
     pub static DIF16_AVX512 = Fft {
-        core_1: core_x2::<Avx512X2>,
+        core_1: core_x4::<Avx512X2, Avx512X4>,
         native: Avx512X4,
         x1: Avx512X1,
         target: "avx512f",
