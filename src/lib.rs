@@ -26,6 +26,8 @@ mod dit2;
 mod dit4;
 mod dit8;
 
+pub mod inplace4;
+
 #[allow(non_camel_case_types)]
 pub type c64 = Complex64;
 #[allow(non_camel_case_types)]

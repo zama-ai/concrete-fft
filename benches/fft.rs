@@ -89,7 +89,16 @@ impl PlanInterleavedC64 {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    for n in [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
+    for n in [
+        1 << 9,
+        1 << 10,
+        1 << 11,
+        1 << 12,
+        1 << 13,
+        1 << 14,
+        1 << 15,
+        1 << 16,
+    ] {
         let mut mem = dyn_stack::GlobalMemBuffer::new(
             StackReq::new_aligned::<c64>(n, 64) // scratch
                 .and(
@@ -111,6 +120,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
             let bench_duration = std::time::Duration::from_millis(100);
             let binfft = binfft::Plan::new(n, binfft::Method::Measure(bench_duration));
+            dbg!(&binfft);
 
             {
                 let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
@@ -139,15 +149,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     b.iter(|| binfft.fwd(&mut *dst, stack.rb_mut()))
                 });
             }
-            {
-                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("binfft-inv-{}", n), |b| {
-                    b.iter(|| binfft.inv(&mut *dst, stack.rb_mut()))
-                });
-            }
         }
 
+        {
+            let (w, stack) = stack.rb_mut().make_aligned_with::<c64, _>(2 * n, 64, |_| z);
+            let (mut dst, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
+
+            c.bench_function(&format!("binfft-fwd-{}", n), |b| {
+                b.iter(|| unsafe { binfft::inplace4::fwd_fma(n, dst.as_mut_ptr(), w.as_ptr()) });
+            });
+        }
         // memcpy
         {
             let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
