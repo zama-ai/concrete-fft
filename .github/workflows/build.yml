@@ -58,4 +58,4 @@ jobs:
           toolchain: nightly
           override: true
       - name: Test debug nightly
-        run: cargo test --features=nightly
+        run: cargo test

@@ -17,15 +17,16 @@
 //!
 //!  - `std` (default): This enables runtime arch detection for accelerated SIMD instructions, and
 //!  an FFT plan that measures the various implementations to choose the fastest one at runtime.
-//!  - `nightly`: This enables unstable Rust features to further speed up the FFT, by enabling
-//!  AVX512F instructions on CPUs that support them. This feature requires a nightly Rust
-//!  toolchain.
 //!  - `serde`: This enables serialization and deserialization functions for the unordered plan.
 //!  These allow for data in the Fourier domain to be serialized from the permuted order to the
 //!  standard order, and deserialized from the standard order to the permuted order.
 //!  This is needed since the inverse transform must be used with the same plan that
 //!  computed/deserialized the forward transform (or more specifically, a plan with the same
 //!  internal base FFT size).
+//!
+//!  - `nightly` (automatic feature): This feature is enabled on nightly builds. It enables
+//!  unstable Rust features to further speed up the FFT, by activating AVX512F instructions on CPUs
+//!  that support them.
 //!
 //! # Example
 //!
