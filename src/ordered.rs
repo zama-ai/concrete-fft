@@ -87,7 +87,7 @@ fn measure_n_runs(
 
 #[cfg(feature = "std")]
 fn duration_div_f64(duration: Duration, n: f64) -> Duration {
-    Duration::from_secs_f64(duration.as_secs_f64() / n as f64)
+    Duration::from_secs_f64(duration.as_secs_f64() / n)
 }
 
 #[cfg(feature = "std")]
