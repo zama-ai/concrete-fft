@@ -1,7 +1,7 @@
 use concrete_fft::c64;
 use core::ptr::NonNull;
 use criterion::{criterion_group, criterion_main, Criterion};
-use dyn_stack::{DynStack, ReborrowMut, StackReq};
+use dyn_stack::{PodStack, ReborrowMut, StackReq};
 
 struct FftwAlloc {
     bytes: NonNull<core::ffi::c_void>,
@@ -100,89 +100,61 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         1 << 15,
         1 << 16,
     ] {
-        let mut mem = dyn_stack::GlobalMemBuffer::new(
-            StackReq::new_aligned::<c64>(n, 64) // scratch
-                .and(
-                    StackReq::new_aligned::<c64>(2 * n, 64).or(StackReq::new_aligned::<c64>(n, 64)), // src | twiddles
-                )
-                .and(StackReq::new_aligned::<c64>(n, 64)), // dst
-        );
-        let mut stack = DynStack::new(&mut mem);
+        let mut mem = dyn_stack::GlobalPodBuffer::new(StackReq::all_of([
+            StackReq::new_aligned::<c64>(2 * n, 256), // scratch
+            StackReq::new_aligned::<c64>(n, 256),     // src
+            StackReq::new_aligned::<c64>(n, 256),     // dst
+        ]));
+        let mut stack = PodStack::new(&mut mem);
         let z = c64::new(0.0, 0.0);
 
-        {
-            use rustfft::FftPlannerAvx;
+        use rustfft::FftPlannerAvx;
+        let mut scratch = [];
+
+        let bench_duration = std::time::Duration::from_millis(10);
+        let unordered = concrete_fft::unordered::Plan::new(
+            n,
+            concrete_fft::unordered::Method::Measure(bench_duration),
+        );
+
+        let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
+        let (mut src, mut stack) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
+
+        c.bench_function(&format!("rustfft-fwd-{}", n), |b| {
             let mut planner = FftPlannerAvx::<f64>::new().unwrap();
-
             let fwd_rustfft = planner.plan_fft_forward(n);
-            let mut scratch = [];
+            b.iter(|| fwd_rustfft.process_outofplace_with_scratch(&mut src, &mut dst, &mut scratch))
+        });
 
+        c.bench_function(&format!("fftw-fwd-{}", n), |b| {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
-
-            let bench_duration = std::time::Duration::from_millis(10);
+            b.iter(|| {
+                fwd_fftw.execute(&mut src, &mut dst);
+            })
+        });
+        if n <= 1024 {
             let ordered = concrete_fft::ordered::Plan::new(
                 n,
                 concrete_fft::ordered::Method::Measure(bench_duration),
             );
-            let unordered = concrete_fft::unordered::Plan::new(
-                n,
-                concrete_fft::unordered::Method::Measure(bench_duration),
-            );
 
-            {
-                let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-                let (mut src, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("rustfft-fwd-{n}"), |b| {
-                    b.iter(|| {
-                        fwd_rustfft.process_outofplace_with_scratch(
-                            &mut src,
-                            &mut dst,
-                            &mut scratch,
-                        )
-                    })
-                });
-
-                c.bench_function(&format!("fftw-fwd-{n}"), |b| {
-                    b.iter(|| {
-                        fwd_fftw.execute(&mut src, &mut dst);
-                    })
-                });
-            }
-            {
-                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("concrete-fwd-{n}"), |b| {
-                    b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
-                });
-            }
-            {
-                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("unordered-fwd-{n}"), |b| {
-                    b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
-                });
-            }
-            {
-                let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-
-                c.bench_function(&format!("unordered-inv-{n}"), |b| {
-                    b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
-                });
-            }
-        }
-
-        // memcpy
-        {
-            let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-            let (src, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
-
-            c.bench_function(&format!("memcpy-{n}"), |b| {
-                b.iter(|| unsafe {
-                    std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
-                })
+            c.bench_function(&format!("concrete-fwd-{}", n), |b| {
+                b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
             });
         }
+        c.bench_function(&format!("unordered-fwd-{}", n), |b| {
+            b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
+        });
+        c.bench_function(&format!("unordered-inv-{}", n), |b| {
+            b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
+        });
+
+        // memcpy
+        c.bench_function(&format!("memcpy-{}", n), |b| {
+            b.iter(|| unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
+            })
+        });
     }
 }
 
