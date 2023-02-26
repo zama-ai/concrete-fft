@@ -1,424 +1,217 @@
-// Copyright (c) 2019 OK Ojisan(Takuya OKAHISA)
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
-use crate::c64;
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64X2, Scalar};
-use crate::x86_feature_detected;
+use crate::{
+    c64,
+    fft_simd::{FftSimd, Pod},
+    fn_ptr, nat, RecursiveFft,
+};
 
 #[inline(always)]
-unsafe fn core_<I: FftSimd64>(
+pub fn split_2<T>(slice: &[T]) -> (&[T], &[T]) {
+    slice.split_at(slice.len() / 2)
+}
+#[inline(always)]
+pub fn split_mut_2<T>(slice: &mut [T]) -> (&mut [T], &mut [T]) {
+    slice.split_at_mut(slice.len() / 2)
+}
+
+#[inline(always)]
+fn stockham_core_1x2<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
     _fwd: bool,
-    n: usize,
     s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
+    x: &[c64xN],
+    y: &mut [c64xN],
+    w_init: &[c64xN],
+    _w: &[c64],
 ) {
-    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
+    assert_eq!(s, 1);
 
-    let m = n / 2;
-    let big_n = n * s;
-    let big_n0 = 0;
-    let big_n1 = big_n / 2;
+    let y = pulp::as_arrays_mut::<2, _>(y).0;
+    let (x0, x1) = split_2(x);
+    let (_, w1) = split_2(w_init);
 
-    for p in 0..m {
-        let sp = s * p;
-        let s2p = 2 * sp;
-        let w1p = I::splat(twid_t(2, big_n, 1, w, sp));
+    for (x0, x1, y, w1) in izip!(x0, x1, y, w1) {
+        let a = *x0;
+        let b = *x1;
+        let w1 = *w1;
 
-        let mut q = 0;
-        while q < s {
-            let xq_sp = x.add(q + sp);
-            let yq_s2p = y.add(q + s2p);
+        let aa = simd.add(a, b);
+        let bb = simd.mul(w1, simd.sub(a, b));
 
-            let a = I::load(xq_sp.add(big_n0));
-            let b = I::load(xq_sp.add(big_n1));
+        y[0] = simd.catlo(aa, bb);
+        y[1] = simd.cathi(aa, bb);
+    }
+}
 
-            I::store(yq_s2p.add(s * 0), I::add(a, b));
-            I::store(yq_s2p.add(s * 1), I::mul(w1p, I::sub(a, b)));
+#[inline(always)]
+fn stockham_core_generic<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    _fwd: bool,
+    s: usize,
+    x: &[c64xN],
+    y: &mut [c64xN],
+    _w_init: &[c64xN],
+    w: &[c64],
+) {
+    assert_eq!(s % simd.lane_count(), 0);
+    let simd_s = s / simd.lane_count();
 
-            q += I::COMPLEX_PER_REG;
+    let w = pulp::as_arrays::<2, _>(w).0;
+
+    let (x0, x1) = split_2(x);
+
+    for (x0, x1, y, w) in izip!(
+        x0.chunks_exact(simd_s),
+        x1.chunks_exact(simd_s),
+        y.chunks_exact_mut(2 * simd_s),
+        w.chunks_exact(s),
+    ) {
+        let [_, w1] = w[0];
+
+        let w1 = simd.splat(w1);
+
+        let (y0, y1) = split_mut_2(y);
+
+        for (x0, x1, y0, y1) in izip!(x0, x1, y0, y1) {
+            let a = *x0;
+            let b = *x1;
+            *y0 = simd.add(a, b);
+            *y1 = simd.mul(w1, simd.sub(a, b));
         }
     }
 }
 
 #[inline(always)]
-#[allow(dead_code)]
-unsafe fn core_x2<I: FftSimd64X2>(
-    _fwd: bool,
-    n: usize,
+fn stockham_core<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    fwd: bool,
     s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
+    x: &[c64xN],
+    y: &mut [c64xN],
+    w_init: &[c64xN],
+    w: &[c64],
 ) {
-    debug_assert_eq!(s, 1);
-
-    let big_n = n;
-    let big_n0 = 0;
-    let big_n1 = big_n / 2;
-
-    let mut p = 0;
-    while p < big_n1 {
-        let x_p = x.add(p);
-        let y_2p = y.add(2 * p);
-
-        let a = I::load(x_p.add(big_n0));
-        let b = I::load(x_p.add(big_n1));
-
-        let w1p = I::load(twid(2, big_n, 1, w, p));
-
-        let aa = I::add(a, b);
-        let bb = I::mul(w1p, I::sub(a, b));
-
-        {
-            let ab = I::catlo(aa, bb);
-            I::store(y_2p.add(0), ab);
-        }
-        {
-            let ab = I::cathi(aa, bb);
-            I::store(y_2p.add(2), ab);
-        }
-
-        p += 2;
-    }
+    // we create a fn pointer that will be force-inlined in release builds
+    // but not in debug builds. this helps keep compile times low, since dead code
+    // elimination handles this well in release builds. and the function pointer indirection
+    // prevents inlining in debug builds.
+    let stockham = if s == 1 && simd.lane_count() == 2 {
+        stockham_core_1x2
+    } else {
+        stockham_core_generic
+    };
+    stockham(simd, fwd, s, x, y, w_init, w);
 }
 
 #[inline(always)]
-pub unsafe fn end_2<I: FftSimd64>(
+fn last_butterfly<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
     _fwd: bool,
-    n: usize,
+    x0: c64xN,
+    x1: c64xN,
+) -> (c64xN, c64xN) {
+    (simd.add(x0, x1), simd.sub(x0, x1))
+}
+
+#[inline(always)]
+pub fn stockham_dif2_end<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    fwd: bool,
+    write_to_x: bool,
     s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    eo: bool,
+    x: &mut [c64xN],
+    y: &mut [c64xN],
 ) {
-    debug_assert_eq!(n, 2);
-    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
-    let z = if eo { y } else { x };
+    assert_eq!(s % simd.lane_count(), 0);
+    let (x0, x1) = split_mut_2(x);
+    let (y0, y1) = split_mut_2(y);
 
-    let mut q = 0;
-    while q < s {
-        let xq = x.add(q);
-        let zq = z.add(q);
+    // we create a fn pointer that will be force-inlined in release builds
+    // but not in debug builds. this helps keep compile times low, since dead code
+    // elimination handles this well in release builds. and the function pointer indirection
+    // prevents inlining in debug builds.
+    let last_butterfly: fn(_, _, _, _) -> _ = last_butterfly;
 
-        let a = I::load(xq.add(0));
-        let b = I::load(xq.add(s));
-
-        I::store(zq.add(0), I::add(a, b));
-        I::store(zq.add(s), I::sub(a, b));
-
-        q += I::COMPLEX_PER_REG;
+    if write_to_x {
+        for (x0, x1) in izip!(x0, x1) {
+            (*x0, *x1) = last_butterfly(simd, fwd, *x0, *x1);
+        }
+    } else {
+        for (x0, x1, y0, y1) in izip!(x0, x1, y0, y1) {
+            (*y0, *y1) = last_butterfly(simd, fwd, *x0, *x1);
+        }
     }
 }
 
-macro_rules! dif2_impl {
-    (
-        $(
-            $(#[$attr: meta])*
-            pub static $fft: ident = Fft {
-                core_1: $core1______: expr,
-                native: $xn: ty,
-                x1: $x1: ty,
-                $(target: $target: tt,)?
-            };
-        )*
-    ) => {
-        $(
-            #[allow(missing_copy_implementations)]
-            #[allow(non_camel_case_types)]
-            #[allow(dead_code)]
-            $(#[$attr])*
-            struct $fft {
-                __private: (),
+pub struct Dif2<N: nat::Nat>(N);
+impl<N: nat::Nat> nat::Nat for Dif2<N> {
+    const VALUE: usize = N::VALUE;
+}
+
+/// size 2
+impl RecursiveFft for Dif2<nat::N0> {
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        write_to_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        _w_init: &[c64xN],
+        _w: &[c64],
+    ) {
+        stockham_dif2_end(simd, fwd, write_to_x, s, x, y);
+    }
+}
+
+impl<N: nat::Nat> RecursiveFft for Dif2<nat::Plus1<N>>
+where
+    Dif2<N>: RecursiveFft,
+{
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        write_to_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        w_init: &[c64xN],
+        w: &[c64],
+    ) {
+        stockham_core(simd, fwd, s, x, y, w_init, w);
+        Dif2::<N>::fft_recurse_impl(simd, fwd, !write_to_x, s * 2, y, x, w_init, w);
+    }
+}
+
+pub(crate) fn fft_impl<c64xN: Pod>(simd: impl FftSimd<c64xN>) -> crate::FftImpl {
+    // special case, for DIF2, fwd and inv are the same
+    let ptrs = [
+        fn_ptr::<true, Dif2<nat::N0>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N1>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N2>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N3>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N4>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N5>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N6>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N7>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N8>, _, _>(simd),
+        fn_ptr::<true, Dif2<nat::N9>, _, _>(simd),
+    ];
+    crate::FftImpl {
+        fwd: ptrs,
+        inv: ptrs,
+    }
+}
+
+pub fn fft_impl_dispatch(n: usize) -> [fn(&mut [c64], &mut [c64], &[c64], &[c64]); 2] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if let Some(simd) = pulp::x86::V3::try_new() {
+            if n >= 2 * simd.lane_count() {
+                return fft_impl(simd).make_fn_ptr(n);
             }
-            #[allow(unused_variables)]
-            #[allow(dead_code)]
-            $(#[$attr])*
-            impl $fft {
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_00<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {}
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_01<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_2::<$x1>(FWD, 1 << 1, 1 << 0, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_02<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 2, 1 << 0, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 1, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_03<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 3, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 1, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 2, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_04<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 4, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 2, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 3, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_05<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 5, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 3, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 4, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_06<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 6, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 3, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 4, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 5, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_07<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 7, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 3, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 4, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 5, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 6, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_08<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 8, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 3, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 4, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 5, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 6, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 7, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_09<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 9, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 3, y, x, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 4, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 5, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 6, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 7, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 8, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_10<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 10, 1 << 0, x, y, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 1, y, x, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 2, x, y, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 3, y, x, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 4, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 5, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 6, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 7, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 8, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 9, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_11<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 11, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 09, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 10, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_12<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 12, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 09, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 10, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 11, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_13<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 13, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 12, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 09, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 10, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 11, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 12, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_14<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 14, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 13, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 12, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 09, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 10, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 11, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 12, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 13, y, x, true);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_15<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 15, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 14, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 13, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 12, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 09, y, x, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 10, x, y, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 11, y, x, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 12, x, y, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 13, y, x, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 14, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_16<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    $core1______(FWD, 1 << 16, 1 << 00, x, y, w);
-                    core_::<$xn>(FWD, 1 << 15, 1 << 01, y, x, w);
-                    core_::<$xn>(FWD, 1 << 14, 1 << 02, x, y, w);
-                    core_::<$xn>(FWD, 1 << 13, 1 << 03, y, x, w);
-                    core_::<$xn>(FWD, 1 << 12, 1 << 04, x, y, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 05, y, x, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 06, x, y, w);
-                    core_::<$xn>(FWD, 1 << 9, 1 << 07, y, x, w);
-                    core_::<$xn>(FWD, 1 << 8, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 7, 1 << 09, y, x, w);
-                    core_::<$xn>(FWD, 1 << 6, 1 << 10, x, y, w);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 11, y, x, w);
-                    core_::<$xn>(FWD, 1 << 4, 1 << 12, x, y, w);
-                    core_::<$xn>(FWD, 1 << 3, 1 << 13, y, x, w);
-                    core_::<$xn>(FWD, 1 << 2, 1 << 14, x, y, w);
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 15, y, x, true);
-                }
-            }
-            $(#[$attr])*
-            pub(crate) static $fft: crate::FftImpl = crate::FftImpl {
-                fwd: [
-                    <$fft>::fft_00::<true>,
-                    <$fft>::fft_01::<true>,
-                    <$fft>::fft_02::<true>,
-                    <$fft>::fft_03::<true>,
-                    <$fft>::fft_04::<true>,
-                    <$fft>::fft_05::<true>,
-                    <$fft>::fft_06::<true>,
-                    <$fft>::fft_07::<true>,
-                    <$fft>::fft_08::<true>,
-                    <$fft>::fft_09::<true>,
-                    <$fft>::fft_10::<true>,
-                    <$fft>::fft_11::<true>,
-                    <$fft>::fft_12::<true>,
-                    <$fft>::fft_13::<true>,
-                    <$fft>::fft_14::<true>,
-                    <$fft>::fft_15::<true>,
-                    <$fft>::fft_16::<true>,
-                ],
-                inv: [
-                    <$fft>::fft_00::<false>,
-                    <$fft>::fft_01::<false>,
-                    <$fft>::fft_02::<false>,
-                    <$fft>::fft_03::<false>,
-                    <$fft>::fft_04::<false>,
-                    <$fft>::fft_05::<false>,
-                    <$fft>::fft_06::<false>,
-                    <$fft>::fft_07::<false>,
-                    <$fft>::fft_08::<false>,
-                    <$fft>::fft_09::<false>,
-                    <$fft>::fft_10::<false>,
-                    <$fft>::fft_11::<false>,
-                    <$fft>::fft_12::<false>,
-                    <$fft>::fft_13::<false>,
-                    <$fft>::fft_14::<false>,
-                    <$fft>::fft_15::<false>,
-                    <$fft>::fft_16::<false>,
-                ],
-            };
-            )*
-    };
-}
-
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-use crate::x86::*;
-
-dif2_impl! {
-    pub static DIF2_SCALAR = Fft {
-        core_1: core_::<Scalar>,
-        native: Scalar,
-        x1: Scalar,
-    };
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    pub static DIF2_AVX = Fft {
-        core_1: core_x2::<AvxX2>,
-        native: AvxX2,
-        x1: AvxX1,
-        target: "avx",
-    };
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    pub static DIF2_FMA = Fft {
-        core_1: core_x2::<FmaX2>,
-        native: FmaX2,
-        x1: FmaX1,
-        target: "fma",
-    };
-}
-
-pub(crate) fn runtime_fft() -> crate::FftImpl {
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    if x86_feature_detected!("fma") {
-        return DIF2_FMA;
-    } else if x86_feature_detected!("avx") {
-        return DIF2_AVX;
+        }
     }
-
-    DIF2_SCALAR
+    fft_impl(crate::fft_simd::Scalar).make_fn_ptr(n)
 }

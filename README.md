@@ -36,14 +36,14 @@ This library provides two FFT modules:
 ```rust
 use concrete_fft::c64;
 use concrete_fft::ordered::{Plan, Method};
-use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut};
+use dyn_stack::{PodStack, GlobalPodBuffer, ReborrowMut};
 use num_complex::ComplexFloat;
 use std::time::Duration;
 
 const N: usize = 4;
 let plan = Plan::new(4, Method::Measure(Duration::from_millis(10)));
-let mut scratch_memory = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-let mut stack = DynStack::new(&mut scratch_memory);
+let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+let mut stack = PodStack::new(&mut scratch_memory);
 
 let data = [
     c64::new(1.0, 0.0),

@@ -1,178 +1,221 @@
 use crate::c64;
-use core::fmt::Debug;
-use core::mem::transmute;
+use core::{fmt::Debug, marker::PhantomData};
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct c64x1(c64);
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct c64x2(c64, c64);
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct c64x4(c64, c64, c64, c64);
+
+const __ASSERT_POD: () = {
+    #[allow(unknown_lints)]
+    #[allow(clippy::extra_unused_type_parameters)]
+    const fn assert_pod_zeroable<T: bytemuck::Pod + bytemuck::Zeroable>() {}
+
+    // c64 is Pod and Zeroable
+    assert_pod_zeroable::<c64>();
+
+    // no padding
+    assert!(core::mem::size_of::<c64x1>() == core::mem::size_of::<c64>() * 1);
+    assert!(core::mem::size_of::<c64x2>() == core::mem::size_of::<c64>() * 2);
+    assert!(core::mem::size_of::<c64x4>() == core::mem::size_of::<c64>() * 4);
+};
+
+// SAFETY: c64 is Zeroable
+unsafe impl bytemuck::Zeroable for c64x1 {}
+unsafe impl bytemuck::Zeroable for c64x2 {}
+unsafe impl bytemuck::Zeroable for c64x4 {}
+// SAFETY: c64 is Pod, c64x1, c64x2, c64x4 are all repr(C) and have no padding
+unsafe impl bytemuck::Pod for c64x1 {}
+unsafe impl bytemuck::Pod for c64x2 {}
+unsafe impl bytemuck::Pod for c64x4 {}
+
+pub trait Pod: Copy + Debug + bytemuck::Pod {}
+impl<T: Copy + Debug + bytemuck::Pod> Pod for T {}
 
 // cos(-pi/8)
 pub const H1X: f64 = 0.9238795325112867f64;
 // sin(-pi/8)
 pub const H1Y: f64 = -0.38268343236508984f64;
 
-pub trait FftSimd64 {
-    type Reg: Copy + Debug;
-    const COMPLEX_PER_REG: usize;
-
-    unsafe fn splat_re_im(ptr: *const f64) -> Self::Reg;
-    unsafe fn splat(ptr: *const c64) -> Self::Reg;
-    unsafe fn load(ptr: *const c64) -> Self::Reg;
-    unsafe fn store(ptr: *mut c64, z: Self::Reg);
-    unsafe fn xor(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-    unsafe fn swap_re_im(xy: Self::Reg) -> Self::Reg;
-    unsafe fn add(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-    unsafe fn sub(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-    unsafe fn cwise_mul(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-    unsafe fn mul(a: Self::Reg, b: Self::Reg) -> Self::Reg;
+struct AssertC64Vec<T>(PhantomData<T>);
+impl<T> AssertC64Vec<T> {
+    pub const VALID: () = {
+        assert!(core::mem::size_of::<T>() % core::mem::size_of::<c64>() == 0);
+    };
 }
 
-pub trait FftSimd64Ext: FftSimd64 {
+pub trait FftSimd<c64xN: Pod>: Copy + Debug {
+    fn try_new() -> Option<Self>;
     #[inline(always)]
-    unsafe fn conj(xy: Self::Reg) -> Self::Reg {
-        let mask = Self::splat(&c64 { re: 0.0, im: -0.0 });
-        Self::xor(xy, mask)
+    fn vectorize(self, f: impl pulp::NullaryFnOnce<Output = ()>) {
+        f.call()
     }
 
     #[inline(always)]
-    unsafe fn xpj(fwd: bool, xy: Self::Reg) -> Self::Reg {
+    fn lane_count(self) -> usize {
+        #[allow(clippy::let_unit_value)]
+        let _ = AssertC64Vec::<c64xN>::VALID;
+        core::mem::size_of::<c64xN>() / core::mem::size_of::<c64>()
+    }
+
+    fn splat_f64(self, value: f64) -> c64xN;
+    fn splat(self, value: c64) -> c64xN;
+    fn xor(self, a: c64xN, b: c64xN) -> c64xN;
+    fn swap_re_im(self, xy: c64xN) -> c64xN;
+    fn add(self, a: c64xN, b: c64xN) -> c64xN;
+    fn sub(self, a: c64xN, b: c64xN) -> c64xN;
+    fn real_mul(self, a: c64xN, b: c64xN) -> c64xN;
+    fn mul(self, a: c64xN, b: c64xN) -> c64xN;
+
+    // implemented only when `self.lane_count() == 2`
+    fn catlo(self, a: c64xN, b: c64xN) -> c64xN {
+        let _ = a;
+        let _ = b;
+        unimplemented!()
+    }
+    fn cathi(self, a: c64xN, b: c64xN) -> c64xN {
+        let _ = a;
+        let _ = b;
+        unimplemented!()
+    }
+
+    // implemented only when `self.lane_count() == 4`
+    fn transpose(self, a: c64xN, b: c64xN, c: c64xN, d: c64xN) -> (c64xN, c64xN, c64xN, c64xN) {
+        let _ = a;
+        let _ = b;
+        let _ = c;
+        let _ = d;
+        unimplemented!()
+    }
+}
+
+pub trait FftSimdExt<c64xN: Pod>: FftSimd<c64xN> {
+    #[inline(always)]
+    fn conj(self, xy: c64xN) -> c64xN {
+        let mask = self.splat(c64 { re: 0.0, im: -0.0 });
+        self.xor(xy, mask)
+    }
+
+    #[inline(always)]
+    fn mul_j(self, fwd: bool, xy: c64xN) -> c64xN {
         if fwd {
-            Self::swap_re_im(Self::conj(xy))
+            self.swap_re_im(self.conj(xy))
         } else {
-            Self::conj(Self::swap_re_im(xy))
+            self.conj(self.swap_re_im(xy))
         }
     }
 
     #[inline(always)]
-    unsafe fn xmj(fwd: bool, xy: Self::Reg) -> Self::Reg {
-        Self::xpj(!fwd, xy)
+    fn mul_neg_j(self, fwd: bool, xy: c64xN) -> c64xN {
+        self.mul_j(!fwd, xy)
     }
 
     #[inline(always)]
-    unsafe fn xv8(fwd: bool, xy: Self::Reg) -> Self::Reg {
-        let r = Self::splat_re_im(&core::f64::consts::FRAC_1_SQRT_2);
-        Self::cwise_mul(r, Self::add(xy, Self::xpj(fwd, xy)))
+    fn mul_exp_pi_over_8(self, fwd: bool, xy: c64xN) -> c64xN {
+        let r = self.splat_f64(core::f64::consts::FRAC_1_SQRT_2);
+        self.real_mul(r, self.add(xy, self.mul_j(fwd, xy)))
     }
 
     #[inline(always)]
-    unsafe fn xw8(fwd: bool, xy: Self::Reg) -> Self::Reg {
-        Self::xv8(!fwd, xy)
+    fn mul_exp_neg_pi_over_8(self, fwd: bool, xy: c64xN) -> c64xN {
+        self.mul_exp_pi_over_8(!fwd, xy)
     }
 
     #[inline(always)]
-    unsafe fn xh1(fwd: bool, xy: Self::Reg) -> Self::Reg {
+    fn mul_exp_pi_over_16(self, fwd: bool, xy: c64xN) -> c64xN {
         if fwd {
-            Self::mul(Self::splat(&c64 { re: H1X, im: H1Y }), xy)
+            self.mul(self.splat(c64 { re: H1X, im: H1Y }), xy)
         } else {
-            Self::mul(Self::splat(&c64 { re: H1X, im: -H1Y }), xy)
+            self.mul(self.splat(c64 { re: H1X, im: -H1Y }), xy)
         }
     }
 
     #[inline(always)]
-    unsafe fn xh3(fwd: bool, xy: Self::Reg) -> Self::Reg {
+    fn mul_exp_17pi_over_16(self, fwd: bool, xy: c64xN) -> c64xN {
         if fwd {
-            Self::mul(Self::splat(&c64 { re: -H1Y, im: -H1X }), xy)
+            self.mul(self.splat(c64 { re: -H1Y, im: -H1X }), xy)
         } else {
-            Self::mul(Self::splat(&c64 { re: -H1Y, im: H1X }), xy)
+            self.mul(self.splat(c64 { re: -H1Y, im: H1X }), xy)
         }
     }
 
     #[inline(always)]
-    unsafe fn xhf(fwd: bool, xy: Self::Reg) -> Self::Reg {
-        Self::xh1(!fwd, xy)
+    fn mul_exp_neg_pi_over_16(self, fwd: bool, xy: c64xN) -> c64xN {
+        self.mul_exp_pi_over_16(!fwd, xy)
     }
 
     #[inline(always)]
-    unsafe fn xhd(fwd: bool, xy: Self::Reg) -> Self::Reg {
-        Self::xh3(!fwd, xy)
+    fn mul_exp_neg_17pi_over_16(self, fwd: bool, xy: c64xN) -> c64xN {
+        self.mul_exp_17pi_over_16(!fwd, xy)
     }
 }
 
-impl<T: FftSimd64> FftSimd64Ext for T {}
-
-pub trait FftSimd64X2: FftSimd64 {
-    unsafe fn catlo(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-    unsafe fn cathi(a: Self::Reg, b: Self::Reg) -> Self::Reg;
-}
-
-pub trait FftSimd64X4: FftSimd64 {
-    unsafe fn transpose(
-        a: Self::Reg,
-        b: Self::Reg,
-        c: Self::Reg,
-        d: Self::Reg,
-    ) -> (Self::Reg, Self::Reg, Self::Reg, Self::Reg);
-}
+impl<c64xN: Pod, T: FftSimd<c64xN>> FftSimdExt<c64xN> for T {}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Scalar;
 
-impl FftSimd64 for Scalar {
-    type Reg = c64;
-
-    const COMPLEX_PER_REG: usize = 1;
-
+impl FftSimd<c64> for Scalar {
     #[inline(always)]
-    unsafe fn splat_re_im(ptr: *const f64) -> Self::Reg {
-        c64 { re: *ptr, im: *ptr }
+    fn try_new() -> Option<Self> {
+        Some(Scalar)
     }
 
     #[inline(always)]
-    unsafe fn splat(ptr: *const c64) -> Self::Reg {
-        *ptr
+    fn splat_f64(self, value: f64) -> c64 {
+        c64 {
+            re: value,
+            im: value,
+        }
     }
 
     #[inline(always)]
-    unsafe fn load(ptr: *const c64) -> Self::Reg {
-        *ptr
+    fn splat(self, value: c64) -> c64 {
+        value
     }
 
     #[inline(always)]
-    unsafe fn store(ptr: *mut c64, z: Self::Reg) {
-        *ptr = z;
+    fn xor(self, a: c64, b: c64) -> c64 {
+        let a: u128 = pulp::cast(a);
+        let b: u128 = pulp::cast(b);
+        pulp::cast(a ^ b)
     }
 
     #[inline(always)]
-    unsafe fn xor(a: Self::Reg, b: Self::Reg) -> Self::Reg {
-        transmute(transmute::<c64, u128>(a) ^ transmute::<c64, u128>(b))
-    }
-
-    #[inline(always)]
-    unsafe fn swap_re_im(xy: Self::Reg) -> Self::Reg {
-        Self::Reg {
+    fn swap_re_im(self, xy: c64) -> c64 {
+        c64 {
             re: xy.im,
             im: xy.re,
         }
     }
 
     #[inline(always)]
-    unsafe fn add(a: Self::Reg, b: Self::Reg) -> Self::Reg {
+    fn add(self, a: c64, b: c64) -> c64 {
         a + b
     }
 
     #[inline(always)]
-    unsafe fn sub(a: Self::Reg, b: Self::Reg) -> Self::Reg {
+    fn sub(self, a: c64, b: c64) -> c64 {
         a - b
     }
 
     #[inline(always)]
-    unsafe fn mul(a: Self::Reg, b: Self::Reg) -> Self::Reg {
-        a * b
-    }
-
-    #[inline(always)]
-    unsafe fn cwise_mul(a: Self::Reg, b: Self::Reg) -> Self::Reg {
-        Self::Reg {
+    fn real_mul(self, a: c64, b: c64) -> c64 {
+        c64 {
             re: a.re * b.re,
             im: a.im * b.im,
         }
     }
-}
 
-#[inline(always)]
-pub unsafe fn twid(r: usize, big_n: usize, k: usize, w: *const c64, p: usize) -> &'static c64 {
-    &*w.add(p + (k - 1) * (big_n / r))
-}
-
-#[inline(always)]
-pub unsafe fn twid_t(r: usize, big_n: usize, k: usize, w: *const c64, p: usize) -> &'static c64 {
-    &*w.add(r * p + (big_n + k))
+    #[inline(always)]
+    fn mul(self, a: c64, b: c64) -> c64 {
+        a * b
+    }
 }
 
 // https://stackoverflow.com/a/42792940
@@ -254,9 +297,9 @@ pub fn init_wt(r: usize, n: usize, w: &mut [c64], w_inv: &mut [c64]) {
         for k in 1..r {
             let (s, c) = sincospi64(theta * (k * p) as f64);
             let z = c64::new(c, s);
-            w[p + (k - 1) * nr] = z;
+            w[p + k * nr] = z;
             w[n + r * p + k] = z;
-            w_inv[p + (k - 1) * nr] = z.conj();
+            w_inv[p + k * nr] = z.conj();
             w_inv[n + r * p + k] = z.conj();
         }
     }
