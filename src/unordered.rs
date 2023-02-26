@@ -6,458 +6,322 @@
 //! forward FFT terms in an unspecified order. And the backward transform takes its inputs in the
 //! aforementioned order, and outputs the inverse FFT in the standard order.
 
-use crate::fft_simd::{init_wt, sincospi64, FftSimd64, FftSimd64Ext};
-use crate::x86_feature_detected;
-use crate::{c64, ordered::FftAlgo};
+use crate::{
+    c64,
+    dif2::{split_2, split_mut_2},
+    dif4::split_mut_4,
+    dif8::split_mut_8,
+    fft_simd::{init_wt, sincospi64, FftSimd, FftSimdExt, Pod},
+    ordered::FftAlgo,
+};
 use aligned_vec::{avec, ABox, CACHELINE_ALIGN};
 #[cfg(feature = "std")]
 use core::time::Duration;
-use dyn_stack::{DynStack, SizeOverflow, StackReq};
 #[cfg(feature = "std")]
-use dyn_stack::{GlobalMemBuffer, ReborrowMut};
+use dyn_stack::{GlobalPodBuffer, ReborrowMut};
+use dyn_stack::{PodStack, SizeOverflow, StackReq};
 
 #[inline(always)]
-unsafe fn fwd_butterfly_x2<I: FftSimd64>(z0: I::Reg, z1: I::Reg, w1: I::Reg) -> (I::Reg, I::Reg) {
-    (I::add(z0, z1), I::mul(w1, I::sub(z0, z1)))
+fn fwd_butterfly_x2<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    w1: c64xN,
+) -> (c64xN, c64xN) {
+    (simd.add(z0, z1), simd.mul(w1, simd.sub(z0, z1)))
 }
 
 #[inline(always)]
-unsafe fn inv_butterfly_x2<I: FftSimd64>(z0: I::Reg, z1: I::Reg, w1: I::Reg) -> (I::Reg, I::Reg) {
-    let z1 = I::mul(w1, z1);
-    (I::add(z0, z1), I::sub(z0, z1))
+fn inv_butterfly_x2<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    w1: c64xN,
+) -> (c64xN, c64xN) {
+    let z1 = simd.mul(w1, z1);
+    (simd.add(z0, z1), simd.sub(z0, z1))
 }
 
 #[inline(always)]
-unsafe fn fwd_butterfly_x4<I: FftSimd64>(
-    z0: I::Reg,
-    z1: I::Reg,
-    z2: I::Reg,
-    z3: I::Reg,
-    w1: I::Reg,
-    w2: I::Reg,
-    w3: I::Reg,
-) -> (I::Reg, I::Reg, I::Reg, I::Reg) {
-    let z0p2 = I::add(z0, z2);
-    let z0m2 = I::sub(z0, z2);
-    let z1p3 = I::add(z1, z3);
-    let jz1m3 = I::xpj(true, I::sub(z1, z3));
+fn fwd_butterfly_x4<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    z2: c64xN,
+    z3: c64xN,
+    w1: c64xN,
+    w2: c64xN,
+    w3: c64xN,
+) -> (c64xN, c64xN, c64xN, c64xN) {
+    let z0p2 = simd.add(z0, z2);
+    let z0m2 = simd.sub(z0, z2);
+    let z1p3 = simd.add(z1, z3);
+    let jz1m3 = simd.mul_j(true, simd.sub(z1, z3));
 
     (
-        I::add(z0p2, z1p3),
-        I::mul(w1, I::sub(z0m2, jz1m3)),
-        I::mul(w2, I::sub(z0p2, z1p3)),
-        I::mul(w3, I::add(z0m2, jz1m3)),
+        simd.add(z0p2, z1p3),
+        simd.mul(w1, simd.sub(z0m2, jz1m3)),
+        simd.mul(w2, simd.sub(z0p2, z1p3)),
+        simd.mul(w3, simd.add(z0m2, jz1m3)),
     )
 }
 
 #[inline(always)]
-unsafe fn inv_butterfly_x4<I: FftSimd64>(
-    z0: I::Reg,
-    z1: I::Reg,
-    z2: I::Reg,
-    z3: I::Reg,
-    w1: I::Reg,
-    w2: I::Reg,
-    w3: I::Reg,
-) -> (I::Reg, I::Reg, I::Reg, I::Reg) {
+fn inv_butterfly_x4<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    z2: c64xN,
+    z3: c64xN,
+    w1: c64xN,
+    w2: c64xN,
+    w3: c64xN,
+) -> (c64xN, c64xN, c64xN, c64xN) {
     let z0 = z0;
-    let z1 = I::mul(w1, z1);
-    let z2 = I::mul(w2, z2);
-    let z3 = I::mul(w3, z3);
+    let z1 = simd.mul(w1, z1);
+    let z2 = simd.mul(w2, z2);
+    let z3 = simd.mul(w3, z3);
 
-    let z0p2 = I::add(z0, z2);
-    let z0m2 = I::sub(z0, z2);
-    let z1p3 = I::add(z1, z3);
-    let jz1m3 = I::xpj(false, I::sub(z1, z3));
+    let z0p2 = simd.add(z0, z2);
+    let z0m2 = simd.sub(z0, z2);
+    let z1p3 = simd.add(z1, z3);
+    let jz1m3 = simd.mul_j(false, simd.sub(z1, z3));
 
     (
-        I::add(z0p2, z1p3),
-        I::sub(z0m2, jz1m3),
-        I::sub(z0p2, z1p3),
-        I::add(z0m2, jz1m3),
+        simd.add(z0p2, z1p3),
+        simd.sub(z0m2, jz1m3),
+        simd.sub(z0p2, z1p3),
+        simd.add(z0m2, jz1m3),
     )
 }
 
 #[inline(always)]
-unsafe fn fwd_butterfly_x8<I: FftSimd64>(
-    z0: I::Reg,
-    z1: I::Reg,
-    z2: I::Reg,
-    z3: I::Reg,
-    z4: I::Reg,
-    z5: I::Reg,
-    z6: I::Reg,
-    z7: I::Reg,
-    w1: I::Reg,
-    w2: I::Reg,
-    w3: I::Reg,
-    w4: I::Reg,
-    w5: I::Reg,
-    w6: I::Reg,
-    w7: I::Reg,
-) -> (
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-) {
-    let z0p4 = I::add(z0, z4);
-    let z0m4 = I::sub(z0, z4);
-    let z2p6 = I::add(z2, z6);
-    let jz2m6 = I::xpj(true, I::sub(z2, z6));
+fn fwd_butterfly_x8<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    z2: c64xN,
+    z3: c64xN,
+    z4: c64xN,
+    z5: c64xN,
+    z6: c64xN,
+    z7: c64xN,
+    w1: c64xN,
+    w2: c64xN,
+    w3: c64xN,
+    w4: c64xN,
+    w5: c64xN,
+    w6: c64xN,
+    w7: c64xN,
+) -> (c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN) {
+    let z0p4 = simd.add(z0, z4);
+    let z0m4 = simd.sub(z0, z4);
+    let z2p6 = simd.add(z2, z6);
+    let jz2m6 = simd.mul_j(true, simd.sub(z2, z6));
 
-    let z1p5 = I::add(z1, z5);
-    let z1m5 = I::sub(z1, z5);
-    let z3p7 = I::add(z3, z7);
-    let jz3m7 = I::xpj(true, I::sub(z3, z7));
+    let z1p5 = simd.add(z1, z5);
+    let z1m5 = simd.sub(z1, z5);
+    let z3p7 = simd.add(z3, z7);
+    let jz3m7 = simd.mul_j(true, simd.sub(z3, z7));
 
     // z0 + z2 + z4 + z6
-    let t0 = I::add(z0p4, z2p6);
+    let t0 = simd.add(z0p4, z2p6);
     // z1 + z3 + z5 + z7
-    let t1 = I::add(z1p5, z3p7);
+    let t1 = simd.add(z1p5, z3p7);
     // z0 + w4z2 + z4 + w4z6
-    let t2 = I::sub(z0p4, z2p6);
+    let t2 = simd.sub(z0p4, z2p6);
     // w2z1 + w6z3 + w2z5 + w6z7
-    let t3 = I::xpj(true, I::sub(z1p5, z3p7));
+    let t3 = simd.mul_j(true, simd.sub(z1p5, z3p7));
     // z0 + w2z2 + z4 + w6z6
-    let t4 = I::sub(z0m4, jz2m6);
+    let t4 = simd.sub(z0m4, jz2m6);
     // w1z1 + w3z3 + w5z5 + w7z7
-    let t5 = I::xw8(true, I::sub(z1m5, jz3m7));
+    let t5 = simd.mul_exp_neg_pi_over_8(true, simd.sub(z1m5, jz3m7));
     // z0 + w2z2 + w4z4 + w6z6
-    let t6 = I::add(z0m4, jz2m6);
+    let t6 = simd.add(z0m4, jz2m6);
     // w7z1 + w1z3 + w3z5 + w5z7
-    let t7 = I::xv8(true, I::add(z1m5, jz3m7));
+    let t7 = simd.mul_exp_pi_over_8(true, simd.add(z1m5, jz3m7));
 
     (
-        I::add(t0, t1),
-        I::mul(w1, I::add(t4, t5)),
-        I::mul(w2, I::sub(t2, t3)),
-        I::mul(w3, I::sub(t6, t7)),
-        I::mul(w4, I::sub(t0, t1)),
-        I::mul(w5, I::sub(t4, t5)),
-        I::mul(w6, I::add(t2, t3)),
-        I::mul(w7, I::add(t6, t7)),
+        simd.add(t0, t1),
+        simd.mul(w1, simd.add(t4, t5)),
+        simd.mul(w2, simd.sub(t2, t3)),
+        simd.mul(w3, simd.sub(t6, t7)),
+        simd.mul(w4, simd.sub(t0, t1)),
+        simd.mul(w5, simd.sub(t4, t5)),
+        simd.mul(w6, simd.add(t2, t3)),
+        simd.mul(w7, simd.add(t6, t7)),
     )
 }
 
 #[inline(always)]
-unsafe fn inv_butterfly_x8<I: FftSimd64>(
-    z0: I::Reg,
-    z1: I::Reg,
-    z2: I::Reg,
-    z3: I::Reg,
-    z4: I::Reg,
-    z5: I::Reg,
-    z6: I::Reg,
-    z7: I::Reg,
-    w1: I::Reg,
-    w2: I::Reg,
-    w3: I::Reg,
-    w4: I::Reg,
-    w5: I::Reg,
-    w6: I::Reg,
-    w7: I::Reg,
-) -> (
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-    I::Reg,
-) {
+fn inv_butterfly_x8<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    z0: c64xN,
+    z1: c64xN,
+    z2: c64xN,
+    z3: c64xN,
+    z4: c64xN,
+    z5: c64xN,
+    z6: c64xN,
+    z7: c64xN,
+    w1: c64xN,
+    w2: c64xN,
+    w3: c64xN,
+    w4: c64xN,
+    w5: c64xN,
+    w6: c64xN,
+    w7: c64xN,
+) -> (c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN) {
     let z0 = z0;
-    let z1 = I::mul(w1, z1);
-    let z2 = I::mul(w2, z2);
-    let z3 = I::mul(w3, z3);
-    let z4 = I::mul(w4, z4);
-    let z5 = I::mul(w5, z5);
-    let z6 = I::mul(w6, z6);
-    let z7 = I::mul(w7, z7);
+    let z1 = simd.mul(w1, z1);
+    let z2 = simd.mul(w2, z2);
+    let z3 = simd.mul(w3, z3);
+    let z4 = simd.mul(w4, z4);
+    let z5 = simd.mul(w5, z5);
+    let z6 = simd.mul(w6, z6);
+    let z7 = simd.mul(w7, z7);
 
-    let z0p4 = I::add(z0, z4);
-    let z0m4 = I::sub(z0, z4);
-    let z2p6 = I::add(z2, z6);
-    let jz2m6 = I::xpj(false, I::sub(z2, z6));
+    let z0p4 = simd.add(z0, z4);
+    let z0m4 = simd.sub(z0, z4);
+    let z2p6 = simd.add(z2, z6);
+    let jz2m6 = simd.mul_j(false, simd.sub(z2, z6));
 
-    let z1p5 = I::add(z1, z5);
-    let z1m5 = I::sub(z1, z5);
-    let z3p7 = I::add(z3, z7);
-    let jz3m7 = I::xpj(false, I::sub(z3, z7));
+    let z1p5 = simd.add(z1, z5);
+    let z1m5 = simd.sub(z1, z5);
+    let z3p7 = simd.add(z3, z7);
+    let jz3m7 = simd.mul_j(false, simd.sub(z3, z7));
 
     // z0 + z2 + z4 + z6
-    let t0 = I::add(z0p4, z2p6);
+    let t0 = simd.add(z0p4, z2p6);
     // z1 + z3 + z5 + z7
-    let t1 = I::add(z1p5, z3p7);
+    let t1 = simd.add(z1p5, z3p7);
     // z0 + w4z2 + z4 + w4z6
-    let t2 = I::sub(z0p4, z2p6);
+    let t2 = simd.sub(z0p4, z2p6);
     // w2z1 + w6z3 + w2z5 + w6z7
-    let t3 = I::xpj(false, I::sub(z1p5, z3p7));
+    let t3 = simd.mul_j(false, simd.sub(z1p5, z3p7));
     // z0 + w2z2 + z4 + w6z6
-    let t4 = I::sub(z0m4, jz2m6);
+    let t4 = simd.sub(z0m4, jz2m6);
     // w1z1 + w3z3 + w5z5 + w7z7
-    let t5 = I::xw8(false, I::sub(z1m5, jz3m7));
+    let t5 = simd.mul_exp_neg_pi_over_8(false, simd.sub(z1m5, jz3m7));
     // z0 + w2z2 + w4z4 + w6z6
-    let t6 = I::add(z0m4, jz2m6);
+    let t6 = simd.add(z0m4, jz2m6);
     // w7z1 + w1z3 + w3z5 + w5z7
-    let t7 = I::xv8(false, I::add(z1m5, jz3m7));
+    let t7 = simd.mul_exp_pi_over_8(false, simd.add(z1m5, jz3m7));
 
     (
-        I::add(t0, t1),
-        I::add(t4, t5),
-        I::sub(t2, t3),
-        I::sub(t6, t7),
-        I::sub(t0, t1),
-        I::sub(t4, t5),
-        I::add(t2, t3),
-        I::add(t6, t7),
+        simd.add(t0, t1),
+        simd.add(t4, t5),
+        simd.sub(t2, t3),
+        simd.sub(t6, t7),
+        simd.sub(t0, t1),
+        simd.sub(t4, t5),
+        simd.add(t2, t3),
+        simd.add(t6, t7),
     )
 }
 
 #[inline(always)]
-unsafe fn fwd_process_x2<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 2;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(p + I::COMPLEX_PER_REG * 0));
+fn fwd_process_x2<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 1]] = bytemuck::cast_slice(w);
+    let (z0, z1) = split_mut_2(z);
 
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z1.add(p));
-
-        let (z00, z01) = fwd_butterfly_x2::<I>(z00, z01, w1);
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z01);
-
-        p += I::COMPLEX_PER_REG;
+    for (z0, z1, &[w1]) in izip!(z0, z1, w) {
+        (*z0, *z1) = fwd_butterfly_x2(simd, *z0, *z1, w1);
     }
 }
 
 #[inline(always)]
-unsafe fn inv_process_x2<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 2;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(p + I::COMPLEX_PER_REG * 0));
+fn inv_process_x2<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 1]] = bytemuck::cast_slice(w);
+    let (z0, z1) = split_mut_2(z);
 
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z1.add(p));
-
-        let (z00, z01) = inv_butterfly_x2::<I>(z00, z01, w1);
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z01);
-
-        p += I::COMPLEX_PER_REG;
+    for (z0, z1, &[w1]) in izip!(z0, z1, w) {
+        (*z0, *z1) = inv_butterfly_x2(simd, *z0, *z1, w1);
     }
 }
 
 #[inline(always)]
-unsafe fn fwd_process_x4<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 4;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    let z2 = z.add(m * 2);
-    let z3 = z.add(m * 3);
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 0));
-        let w2 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 1));
-        let w3 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 2));
+fn fwd_process_x4<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 3]] = bytemuck::cast_slice(w);
+    let (z0, z1, z2, z3) = split_mut_4(z);
 
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z1.add(p));
-        let z02 = I::load(z2.add(p));
-        let z03 = I::load(z3.add(p));
-
-        let (z00, z01, z02, z03) = fwd_butterfly_x4::<I>(z00, z01, z02, z03, w1, w2, w3);
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z02);
-        I::store(z2.add(p), z01);
-        I::store(z3.add(p), z03);
-
-        p += I::COMPLEX_PER_REG;
+    for (z0, z1, z2, z3, &[w1, w2, w3]) in izip!(z0, z1, z2, z3, w) {
+        (*z0, *z2, *z1, *z3) = fwd_butterfly_x4(simd, *z0, *z1, *z2, *z3, w1, w2, w3);
     }
 }
 
 #[inline(always)]
-unsafe fn inv_process_x4<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 4;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    let z2 = z.add(m * 2);
-    let z3 = z.add(m * 3);
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 0));
-        let w2 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 1));
-        let w3 = I::load(w.add(3 * p + I::COMPLEX_PER_REG * 2));
+fn inv_process_x4<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 3]] = bytemuck::cast_slice(w);
+    let (z0, z1, z2, z3) = split_mut_4(z);
 
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z2.add(p));
-        let z02 = I::load(z1.add(p));
-        let z03 = I::load(z3.add(p));
-
-        let (z00, z01, z02, z03) = inv_butterfly_x4::<I>(z00, z01, z02, z03, w1, w2, w3);
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z01);
-        I::store(z2.add(p), z02);
-        I::store(z3.add(p), z03);
-
-        p += I::COMPLEX_PER_REG;
+    for (z0, z1, z2, z3, &[w1, w2, w3]) in izip!(z0, z1, z2, z3, w) {
+        (*z0, *z1, *z2, *z3) = inv_butterfly_x4(simd, *z0, *z2, *z1, *z3, w1, w2, w3);
     }
 }
 
 #[inline(always)]
-unsafe fn fwd_process_x8<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 8;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    let z2 = z.add(m * 2);
-    let z3 = z.add(m * 3);
-    let z4 = z.add(m * 4);
-    let z5 = z.add(m * 5);
-    let z6 = z.add(m * 6);
-    let z7 = z.add(m * 7);
+fn fwd_process_x8<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 7]] = bytemuck::cast_slice(w);
+    let (z0, z1, z2, z3, z4, z5, z6, z7) = split_mut_8(z);
 
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 0));
-        let w2 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 1));
-        let w3 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 2));
-        let w4 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 3));
-        let w5 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 4));
-        let w6 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 5));
-        let w7 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 6));
-
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z1.add(p));
-        let z02 = I::load(z2.add(p));
-        let z03 = I::load(z3.add(p));
-        let z04 = I::load(z4.add(p));
-        let z05 = I::load(z5.add(p));
-        let z06 = I::load(z6.add(p));
-        let z07 = I::load(z7.add(p));
-
-        let (z00, z01, z02, z03, z04, z05, z06, z07) = fwd_butterfly_x8::<I>(
-            z00, z01, z02, z03, z04, z05, z06, z07, w1, w2, w3, w4, w5, w6, w7,
+    for (z0, z1, z2, z3, z4, z5, z6, z7, &[w1, w2, w3, w4, w5, w6, w7]) in
+        izip!(z0, z1, z2, z3, z4, z5, z6, z7, w)
+    {
+        (*z0, *z4, *z2, *z6, *z1, *z5, *z3, *z7) = fwd_butterfly_x8(
+            simd, *z0, *z1, *z2, *z3, *z4, *z5, *z6, *z7, w1, w2, w3, w4, w5, w6, w7,
         );
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z04);
-        I::store(z2.add(p), z02);
-        I::store(z3.add(p), z06);
-        I::store(z4.add(p), z01);
-        I::store(z5.add(p), z05);
-        I::store(z6.add(p), z03);
-        I::store(z7.add(p), z07);
-
-        p += I::COMPLEX_PER_REG;
     }
 }
 
 #[inline(always)]
-unsafe fn inv_process_x8<I: FftSimd64>(n: usize, z: *mut c64, w: *const c64) {
-    let m = n / 8;
-    let z0 = z.add(m * 0);
-    let z1 = z.add(m * 1);
-    let z2 = z.add(m * 2);
-    let z3 = z.add(m * 3);
-    let z4 = z.add(m * 4);
-    let z5 = z.add(m * 5);
-    let z6 = z.add(m * 6);
-    let z7 = z.add(m * 7);
+fn inv_process_x8<c64xN: Pod>(simd: impl FftSimd<c64xN>, z: &mut [c64], w: &[c64]) {
+    let z: &mut [c64xN] = bytemuck::cast_slice_mut(z);
+    let w: &[[c64xN; 7]] = bytemuck::cast_slice(w);
+    let (z0, z1, z2, z3, z4, z5, z6, z7) = split_mut_8(z);
 
-    debug_assert_eq!(m % I::COMPLEX_PER_REG, 0);
-    let mut p = 0;
-    while p < m {
-        let w1 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 0));
-        let w2 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 1));
-        let w3 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 2));
-        let w4 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 3));
-        let w5 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 4));
-        let w6 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 5));
-        let w7 = I::load(w.add(7 * p + I::COMPLEX_PER_REG * 6));
-
-        let z00 = I::load(z0.add(p));
-        let z01 = I::load(z4.add(p));
-        let z02 = I::load(z2.add(p));
-        let z03 = I::load(z6.add(p));
-        let z04 = I::load(z1.add(p));
-        let z05 = I::load(z5.add(p));
-        let z06 = I::load(z3.add(p));
-        let z07 = I::load(z7.add(p));
-
-        let (z00, z01, z02, z03, z04, z05, z06, z07) = inv_butterfly_x8::<I>(
-            z00, z01, z02, z03, z04, z05, z06, z07, w1, w2, w3, w4, w5, w6, w7,
+    for (z0, z1, z2, z3, z4, z5, z6, z7, &[w1, w2, w3, w4, w5, w6, w7]) in
+        izip!(z0, z1, z2, z3, z4, z5, z6, z7, w)
+    {
+        (*z0, *z1, *z2, *z3, *z4, *z5, *z6, *z7) = inv_butterfly_x8(
+            simd, *z0, *z4, *z2, *z6, *z1, *z5, *z3, *z7, w1, w2, w3, w4, w5, w6, w7,
         );
-
-        I::store(z0.add(p), z00);
-        I::store(z1.add(p), z01);
-        I::store(z2.add(p), z02);
-        I::store(z3.add(p), z03);
-        I::store(z4.add(p), z04);
-        I::store(z5.add(p), z05);
-        I::store(z6.add(p), z06);
-        I::store(z7.add(p), z07);
-
-        p += I::COMPLEX_PER_REG;
     }
 }
 
 macro_rules! dispatcher {
     ($name: ident, $impl: ident) => {
-        #[allow(non_camel_case_types)]
-        struct $name {
-            __private: (),
-        }
-        impl $name {
-            #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-            #[target_feature(enable = "avx512f")]
-            unsafe fn avx512f(n: usize, z: *mut c64, w: *const c64) {
-                $impl::<crate::x86::Avx512X4>(n, z, w);
-            }
+        fn $name() -> fn(&mut [c64], &[c64]) {
             #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-            #[target_feature(enable = "fma")]
-            unsafe fn fma(n: usize, z: *mut c64, w: *const c64) {
-                $impl::<crate::x86::FmaX2>(n, z, w);
-            }
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-            #[target_feature(enable = "avx")]
-            unsafe fn avx(n: usize, z: *mut c64, w: *const c64) {
-                $impl::<crate::x86::AvxX2>(n, z, w);
-            }
-        }
-        fn $name() -> unsafe fn(usize, *mut c64, *const c64) {
-            #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-            if x86_feature_detected!("avx512f") {
-                return $name::avx512f;
+            {
+                #[cfg(feature = "nightly")]
+                if pulp::x86::V4::try_new().is_some() {
+                    return |z, w| {
+                        let simd = pulp::x86::V4::try_new().unwrap();
+                        simd.vectorize(
+                            #[inline(always)]
+                            || $impl(simd, z, w),
+                        );
+                    };
+                }
+
+                if pulp::x86::V3::try_new().is_some() {
+                    return |z, w| {
+                        let simd = pulp::x86::V3::try_new().unwrap();
+                        simd.vectorize(
+                            #[inline(always)]
+                            || $impl(simd, z, w),
+                        );
+                    };
+                }
             }
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-            if x86_feature_detected!("fma") {
-                return $name::fma;
-            } else if x86_feature_detected!("avx") {
-                return $name::avx;
-            }
-
-            $impl::<crate::fft_simd::Scalar>
+            |z, w| $impl(crate::fft_simd::Scalar, z, w)
         }
     };
 }
@@ -471,19 +335,17 @@ dispatcher!(get_inv_process_x4, inv_process_x4);
 dispatcher!(get_inv_process_x8, inv_process_x8);
 
 fn get_complex_per_reg() -> usize {
-    #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-    if x86_feature_detected!("avx512f") {
-        return crate::x86::Avx512X4::COMPLEX_PER_REG;
-    }
-
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    if x86_feature_detected!("fma") {
-        return <crate::x86::FmaX2>::COMPLEX_PER_REG;
-    } else if x86_feature_detected!("avx") {
-        return <crate::x86::AvxX2>::COMPLEX_PER_REG;
+    {
+        #[cfg(feature = "nightly")]
+        if let Some(simd) = pulp::x86::V4::try_new() {
+            return simd.lane_count();
+        }
+        if let Some(simd) = pulp::x86::V3::try_new() {
+            return simd.lane_count();
+        }
     }
-
-    <crate::fft_simd::Scalar>::COMPLEX_PER_REG
+    crate::fft_simd::Scalar.lane_count()
 }
 
 fn init_twiddles(
@@ -498,7 +360,6 @@ fn init_twiddles(
     if n <= base_n {
         init_wt(base_r, n, w, w_inv);
     } else {
-        // FIXME
         let r = if n == 2 * base_n {
             2
         } else if n == 4 * base_n {
@@ -530,37 +391,44 @@ fn init_twiddles(
 }
 
 #[inline(never)]
-unsafe fn fwd_depth(
-    n: usize,
-    z: *mut c64,
-    w: *const c64,
-    base_fn: unsafe fn(*mut c64, *mut c64, *const c64),
+fn fwd_depth(
+    z: &mut [c64],
+    w: &[c64],
+    base_fn: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
     base_n: usize,
-    base_scratch: *mut c64,
-    fwd_process_x2: unsafe fn(usize, *mut c64, *const c64),
-    fwd_process_x4: unsafe fn(usize, *mut c64, *const c64),
-    fwd_process_x8: unsafe fn(usize, *mut c64, *const c64),
+    base_scratch: &mut [c64],
+    fwd_process_x2: fn(&mut [c64], &[c64]),
+    fwd_process_x4: fn(&mut [c64], &[c64]),
+    fwd_process_x8: fn(&mut [c64], &[c64]),
 ) {
+    let n = z.len();
     if n == base_n {
-        base_fn(z, base_scratch, w)
+        let (w_init, w) = split_2(w);
+        base_fn(z, base_scratch, w_init, w);
     } else {
         let r = if n == 2 * base_n {
-            fwd_process_x2(n, z, w);
             2
         } else if n == 4 * base_n {
-            fwd_process_x4(n, z, w);
             4
         } else {
-            fwd_process_x8(n, z, w);
             8
         };
 
         let m = n / r;
-        for i in 0..r {
+        let (w_head, w_tail) = w.split_at((r - 1) * m);
+
+        if n == 2 * base_n {
+            fwd_process_x2(z, w_head);
+        } else if n == 4 * base_n {
+            fwd_process_x4(z, w_head);
+        } else {
+            fwd_process_x8(z, w_head);
+        }
+
+        for z in z.chunks_exact_mut(m) {
             fwd_depth(
-                m,
-                z.add(m * i),
-                w.add((r - 1) * m),
+                z,
+                w_tail,
                 base_fn,
                 base_n,
                 base_scratch,
@@ -573,19 +441,21 @@ unsafe fn fwd_depth(
 }
 
 #[inline(never)]
-unsafe fn inv_depth(
-    n: usize,
-    z: *mut c64,
-    w: *const c64,
-    base_fn: unsafe fn(*mut c64, *mut c64, *const c64),
+fn inv_depth(
+    z: &mut [c64],
+    w: &[c64],
+    base_fn: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
     base_n: usize,
-    base_scratch: *mut c64,
-    inv_process_x2: unsafe fn(usize, *mut c64, *const c64),
-    inv_process_x4: unsafe fn(usize, *mut c64, *const c64),
-    inv_process_x8: unsafe fn(usize, *mut c64, *const c64),
+    base_scratch: &mut [c64],
+    inv_process_x2: fn(&mut [c64], &[c64]),
+    inv_process_x4: fn(&mut [c64], &[c64]),
+    inv_process_x8: fn(&mut [c64], &[c64]),
 ) {
+    let n = z.len();
+
     if n == base_n {
-        base_fn(z, base_scratch, w.sub(2 * n))
+        let (w_init, w) = split_2(w);
+        base_fn(z, base_scratch, w_init, w);
     } else {
         let r = if n == 2 * base_n {
             2
@@ -596,12 +466,11 @@ unsafe fn inv_depth(
         };
 
         let m = n / r;
-        let w = w.sub((r - 1) * m);
-        for i in 0..r {
+        let (w_head, w_tail) = w.split_at(w.len() - (r - 1) * m);
+        for z in z.chunks_exact_mut(m) {
             inv_depth(
-                m,
-                z.add(m * i),
-                w,
+                z,
+                w_head,
                 base_fn,
                 base_n,
                 base_scratch,
@@ -612,11 +481,11 @@ unsafe fn inv_depth(
         }
 
         if r == 2 {
-            inv_process_x2(n, z, w);
+            inv_process_x2(z, w_tail);
         } else if r == 4 {
-            inv_process_x4(n, z, w);
+            inv_process_x4(z, w_tail);
         } else {
-            inv_process_x8(n, z, w);
+            inv_process_x8(z, w_tail);
         }
     }
 }
@@ -629,15 +498,15 @@ unsafe fn inv_depth(
 pub struct Plan {
     twiddles: ABox<[c64]>,
     twiddles_inv: ABox<[c64]>,
-    fwd_process_x2: unsafe fn(usize, *mut c64, *const c64),
-    fwd_process_x4: unsafe fn(usize, *mut c64, *const c64),
-    fwd_process_x8: unsafe fn(usize, *mut c64, *const c64),
-    inv_process_x2: unsafe fn(usize, *mut c64, *const c64),
-    inv_process_x4: unsafe fn(usize, *mut c64, *const c64),
-    inv_process_x8: unsafe fn(usize, *mut c64, *const c64),
+    fwd_process_x2: fn(&mut [c64], &[c64]),
+    fwd_process_x4: fn(&mut [c64], &[c64]),
+    fwd_process_x8: fn(&mut [c64], &[c64]),
+    inv_process_x2: fn(&mut [c64], &[c64]),
+    inv_process_x4: fn(&mut [c64], &[c64]),
+    inv_process_x8: fn(&mut [c64], &[c64]),
     base_n: usize,
-    base_fn_fwd: unsafe fn(*mut c64, *mut c64, *const c64),
-    base_fn_inv: unsafe fn(*mut c64, *mut c64, *const c64),
+    base_fn_fwd: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
+    base_fn_inv: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
     base_algo: FftAlgo,
     n: usize,
 }
@@ -684,19 +553,19 @@ fn measure_fastest_scratch(n: usize) -> StackReq {
 fn measure_fastest(
     mut min_bench_duration_per_algo: Duration,
     n: usize,
-    mut stack: DynStack,
+    mut stack: PodStack,
 ) -> (FftAlgo, usize, Duration) {
     const MIN_DURATION: Duration = Duration::from_millis(1);
     min_bench_duration_per_algo = min_bench_duration_per_algo.max(MIN_DURATION);
 
-    if n <= 512 {
+    if n <= 256 {
         let (algo, duration) =
             crate::ordered::measure_fastest(min_bench_duration_per_algo, n, stack);
         (algo, n, duration)
     } else {
         // bench
 
-        let bases = [512, 1024, 2048, 4096];
+        let bases = [512, 1024];
         let mut algos: [Option<FftAlgo>; 4] = [None; 4];
         let mut avg_durations: [Option<Duration>; 4] = [None; 4];
         let fwd_process_x2 = get_fwd_process_x2();
@@ -728,16 +597,13 @@ fn measure_fastest(
             // get the forward base algo
             let base_fn = crate::ordered::get_fn_ptr(base_algo, base_n)[0];
 
-            let (w, stack) =
-                stack
-                    .rb_mut()
-                    .make_aligned_with::<c64, _>(n + base_n, CACHELINE_ALIGN, |_| {
-                        Default::default()
-                    });
-            let (mut scratch, stack) =
-                stack.make_aligned_with::<c64, _>(base_n, CACHELINE_ALIGN, |_| Default::default());
-            let (mut z, _) =
-                stack.make_aligned_with::<c64, _>(n, CACHELINE_ALIGN, |_| Default::default());
+            let f = |_| c64 { re: 0.0, im: 0.0 };
+            let align = CACHELINE_ALIGN;
+            let (w, stack) = stack
+                .rb_mut()
+                .make_aligned_with::<c64, _>(n + base_n, align, f);
+            let (mut scratch, stack) = stack.make_aligned_with::<c64, _>(base_n, align, f);
+            let (mut z, _) = stack.make_aligned_with::<c64, _>(n, align, f);
 
             let n_runs = min_bench_duration_per_algo.as_secs_f64()
                 / (duration.as_secs_f64() * (n / base_n) as f64);
@@ -747,19 +613,16 @@ fn measure_fastest(
             use std::time::Instant;
             let now = Instant::now();
             for _ in 0..n_runs {
-                unsafe {
-                    fwd_depth(
-                        n,
-                        z.as_mut_ptr(),
-                        w.as_ptr(),
-                        base_fn,
-                        base_n,
-                        scratch.as_mut_ptr(),
-                        fwd_process_x2,
-                        fwd_process_x4,
-                        fwd_process_x8,
-                    );
-                }
+                fwd_depth(
+                    &mut z,
+                    &w,
+                    base_fn,
+                    base_n,
+                    &mut scratch,
+                    fwd_process_x2,
+                    fwd_process_x4,
+                    fwd_process_x8,
+                );
             }
             let duration = now.elapsed();
             avg_durations[i] = Some(duration / n_runs);
@@ -785,7 +648,6 @@ impl Plan {
     /// and the base FFT size is less than `32`.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::unordered::{Method, Plan};
@@ -803,7 +665,7 @@ impl Plan {
                 if base_n != n {
                     assert!(base_n >= 32);
                 }
-                assert!(base_n.trailing_zeros() < 17);
+                assert!(base_n.trailing_zeros() <= 10);
                 (base_algo, base_n)
             }
 
@@ -812,7 +674,7 @@ impl Plan {
                 let (algo, base_n, _) = measure_fastest(
                     duration,
                     n,
-                    DynStack::new(&mut GlobalMemBuffer::new(measure_fastest_scratch(n))),
+                    PodStack::new(&mut GlobalPodBuffer::new(measure_fastest_scratch(n))),
                 );
                 (algo, base_n)
             }
@@ -820,8 +682,12 @@ impl Plan {
 
         let [base_fn_fwd, base_fn_inv] = crate::ordered::get_fn_ptr(base_algo, base_n);
 
-        let mut twiddles = avec![c64::default(); n + base_n].into_boxed_slice();
-        let mut twiddles_inv = avec![c64::default(); n + base_n].into_boxed_slice();
+        let nan = c64 {
+            re: f64::NAN,
+            im: f64::NAN,
+        };
+        let mut twiddles = avec![nan; n + base_n].into_boxed_slice();
+        let mut twiddles_inv = avec![nan; n + base_n].into_boxed_slice();
 
         use crate::ordered::FftAlgo::*;
         let base_r = match base_algo {
@@ -860,7 +726,6 @@ impl Plan {
     /// Returns the vector size of the FFT.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::unordered::{Method, Plan};
@@ -878,12 +743,14 @@ impl Plan {
     /// # Example
     ///
     /// ```
-    /// use concrete_fft::ordered::FftAlgo;
-    /// use concrete_fft::unordered::{Method, Plan};
+    /// use concrete_fft::{
+    ///     ordered::FftAlgo,
+    ///     unordered::{Method, Plan},
+    /// };
     ///
     /// let plan = Plan::new(
     ///     4,
-    ///     Method::UserProvided{
+    ///     Method::UserProvided {
     ///         base_algo: FftAlgo::Dif2,
     ///         base_n: 4,
     ///     },
@@ -897,7 +764,6 @@ impl Plan {
     /// Returns the size and alignment of the scratch memory needed to perform an FFT.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::unordered::{Method, Plan};
@@ -919,38 +785,34 @@ impl Plan {
     /// transform in permuted order.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::c64;
     /// use concrete_fft::unordered::{Method, Plan};
-    /// use dyn_stack::{DynStack, GlobalMemBuffer};
+    /// use dyn_stack::{PodStack, GlobalPodBuffer};
     /// use core::time::Duration;
     ///
     /// let plan = Plan::new(4, Method::Measure(Duration::from_millis(10)));
     ///
-    /// let mut memory = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-    /// let stack = DynStack::new(&mut memory);
+    /// let mut memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+    /// let stack = PodStack::new(&mut memory);
     ///
     /// let mut buf = [c64::default(); 4];
     /// plan.fwd(&mut buf, stack);
     /// ```
-    pub fn fwd(&self, buf: &mut [c64], stack: DynStack) {
+    pub fn fwd(&self, buf: &mut [c64], stack: PodStack) {
         assert_eq!(self.fft_size(), buf.len());
-        let (mut scratch, _) = stack.make_aligned_uninit::<c64>(self.algo().1, CACHELINE_ALIGN);
-        unsafe {
-            fwd_depth(
-                self.n,
-                buf.as_mut_ptr(),
-                self.twiddles.as_ptr(),
-                self.base_fn_fwd,
-                self.base_n,
-                scratch.as_mut_ptr() as *mut c64,
-                self.fwd_process_x2,
-                self.fwd_process_x4,
-                self.fwd_process_x8,
-            );
-        }
+        let (mut scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
+        fwd_depth(
+            buf,
+            &self.twiddles,
+            self.base_fn_fwd,
+            self.base_n,
+            &mut scratch,
+            self.fwd_process_x2,
+            self.fwd_process_x4,
+            self.fwd_process_x8,
+        );
     }
 
     /// Performs an inverse FFT in place, using the provided stack as scratch space.
@@ -962,39 +824,35 @@ impl Plan {
     /// transform in standard order.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::c64;
     /// use concrete_fft::unordered::{Method, Plan};
-    /// use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut};
+    /// use dyn_stack::{PodStack, GlobalPodBuffer, ReborrowMut};
     /// use core::time::Duration;
     ///
     /// let plan = Plan::new(4, Method::Measure(Duration::from_millis(10)));
     ///
-    /// let mut memory = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-    /// let mut stack = DynStack::new(&mut memory);
+    /// let mut memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+    /// let mut stack = PodStack::new(&mut memory);
     ///
     /// let mut buf = [c64::default(); 4];
     /// plan.fwd(&mut buf, stack.rb_mut());
     /// plan.inv(&mut buf, stack);
     /// ```
-    pub fn inv(&self, buf: &mut [c64], stack: DynStack) {
+    pub fn inv(&self, buf: &mut [c64], stack: PodStack) {
         assert_eq!(self.fft_size(), buf.len());
-        let (mut scratch, _) = stack.make_aligned_uninit::<c64>(self.algo().1, CACHELINE_ALIGN);
-        unsafe {
-            inv_depth(
-                self.n,
-                buf.as_mut_ptr(),
-                self.twiddles_inv.as_ptr().add(self.n + self.base_n),
-                self.base_fn_inv,
-                self.base_n,
-                scratch.as_mut_ptr() as *mut c64,
-                self.inv_process_x2,
-                self.inv_process_x4,
-                self.inv_process_x8,
-            );
-        }
+        let (mut scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
+        inv_depth(
+            buf,
+            &self.twiddles_inv,
+            self.base_fn_inv,
+            self.base_n,
+            &mut scratch,
+            self.inv_process_x2,
+            self.inv_process_x4,
+            self.inv_process_x8,
+        );
     }
 
     /// Serialize a buffer containing data in the Fourier domain that is stored in the
@@ -1113,8 +971,7 @@ fn bit_rev_twice(nbits: u32, base_nbits: u32, i: usize) -> usize {
 mod tests {
     use super::*;
     use alloc::vec;
-    use dyn_stack::GlobalMemBuffer;
-    use dyn_stack::ReborrowMut;
+    use dyn_stack::{GlobalPodBuffer, ReborrowMut};
     use num_complex::ComplexFloat;
     use rand::random;
 
@@ -1122,7 +979,7 @@ mod tests {
 
     #[test]
     fn test_fwd() {
-        for n in [256, 512, 1024] {
+        for n in [128, 256, 512, 1024] {
             let mut z = vec![c64::default(); n];
 
             for z in &mut z {
@@ -1130,10 +987,10 @@ mod tests {
                 z.im = random();
             }
 
-            let mut z_ref = z.clone();
+            let mut z_target = z.clone();
             let mut planner = rustfft::FftPlanner::new();
             let fwd = planner.plan_fft_forward(n);
-            fwd.process(&mut z_ref);
+            fwd.process(&mut z_target);
 
             let plan = Plan::new(
                 n,
@@ -1143,16 +1000,13 @@ mod tests {
                 },
             );
             let base_n = plan.algo().1;
-            let mut mem = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-            let stack = DynStack::new(&mut *mem);
+            let mut mem = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let stack = PodStack::new(&mut mem);
             plan.fwd(&mut z, stack);
 
-            for i in 0..n {
-                assert!(
-                    (z[bit_rev_twice(n.trailing_zeros(), base_n.trailing_zeros(), i)] - z_ref[i])
-                        .abs()
-                        < 1e-12
-                );
+            for (i, z_target) in z_target.iter().enumerate() {
+                let idx = bit_rev_twice(n.trailing_zeros(), base_n.trailing_zeros(), i);
+                assert!((z[idx] - z_target).abs() < 1e-12);
             }
         }
     }
@@ -1176,8 +1030,8 @@ mod tests {
                     base_n: 32,
                 },
             );
-            let mut mem = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = DynStack::new(&mut *mem);
+            let mut mem = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut mem);
             plan.fwd(&mut z, stack.rb_mut());
             plan.inv(&mut z, stack);
 
@@ -1195,9 +1049,12 @@ mod tests {
 #[cfg(all(test, feature = "serde"))]
 mod tests_serde {
     use super::*;
-    use dyn_stack::GlobalMemBuffer;
+    use alloc::{vec, vec::Vec};
+    use dyn_stack::{GlobalPodBuffer, ReborrowMut};
     use num_complex::ComplexFloat;
     use rand::random;
+
+    extern crate alloc;
 
     #[test]
     fn test_serde() {
@@ -1226,13 +1083,13 @@ mod tests_serde {
                 },
             );
 
-            let mut mem = GlobalMemBuffer::new(
+            let mut mem = GlobalPodBuffer::new(
                 plan1
                     .fft_scratch()
                     .unwrap()
                     .or(plan2.fft_scratch().unwrap()),
             );
-            let mut stack = DynStack::new(&mut *mem);
+            let mut stack = PodStack::new(&mut mem);
 
             plan1.fwd(&mut z, stack.rb_mut());
 

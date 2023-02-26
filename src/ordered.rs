@@ -10,16 +10,14 @@
 //! and the inverse FFT $[Y_0, \dots, Y_{n-1}]$ is given by
 //! $$Y_p = \sum_{q = 0}^{n-1} \exp\left(\frac{i 2\pi pq}{n}\right).$$
 
-use crate::*;
-use aligned_vec::avec;
-use aligned_vec::ABox;
-use aligned_vec::CACHELINE_ALIGN;
+use crate::{dif2::split_2, *};
+use aligned_vec::{avec, ABox, CACHELINE_ALIGN};
 
 #[cfg(feature = "std")]
 use core::time::Duration;
-use dyn_stack::{DynStack, SizeOverflow, StackReq};
 #[cfg(feature = "std")]
-use dyn_stack::{GlobalMemBuffer, ReborrowMut};
+use dyn_stack::{GlobalPodBuffer, ReborrowMut};
+use dyn_stack::{PodStack, SizeOverflow, StackReq};
 
 /// Internal FFT algorithm.
 ///
@@ -65,21 +63,19 @@ fn measure_n_runs(
     n_runs: u128,
     algo: FftAlgo,
     buf: &mut [c64],
+    twiddles_init: &[c64],
     twiddles: &[c64],
-    stack: DynStack,
+    stack: PodStack,
 ) -> Duration {
     let n = buf.len();
-    let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, CACHELINE_ALIGN);
-    let scratch = scratch.as_mut_ptr() as *mut c64;
+    let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
     let [fwd, _] = get_fn_ptr(algo, n);
 
     use std::time::Instant;
     let now = Instant::now();
 
     for _ in 0..n_runs {
-        unsafe {
-            fwd(buf.as_mut_ptr(), scratch, twiddles.as_ptr());
-        }
+        fwd(buf, &mut scratch, twiddles, twiddles_init);
     }
 
     now.elapsed()
@@ -87,7 +83,7 @@ fn measure_n_runs(
 
 #[cfg(feature = "std")]
 fn duration_div_f64(duration: Duration, n: f64) -> Duration {
-    Duration::from_secs_f64(duration.as_secs_f64() / n as f64)
+    Duration::from_secs_f64(duration.as_secs_f64() / n)
 }
 
 #[cfg(feature = "std")]
@@ -102,7 +98,7 @@ pub(crate) fn measure_fastest_scratch(n: usize) -> StackReq {
 pub(crate) fn measure_fastest(
     min_bench_duration_per_algo: Duration,
     n: usize,
-    stack: DynStack,
+    stack: PodStack,
 ) -> (FftAlgo, Duration) {
     const N_ALGOS: usize = 8;
     const MIN_DURATION: Duration = Duration::from_millis(1);
@@ -111,9 +107,11 @@ pub(crate) fn measure_fastest(
 
     let align = CACHELINE_ALIGN;
 
-    let f = |_| c64::default();
+    let f = |_| c64 { re: 0.0, im: 0.0 };
 
     let (twiddles, stack) = stack.make_aligned_with::<c64, _>(2 * n, align, f);
+    let twiddles_init = &twiddles[..n];
+    let twiddles = &twiddles[n..];
     let (mut buf, mut stack) = stack.make_aligned_with::<c64, _>(n, align, f);
 
     {
@@ -144,7 +142,14 @@ pub(crate) fn measure_fastest(
             let mut n_runs: u128 = 1;
 
             loop {
-                let duration = measure_n_runs(n_runs, algo, &mut buf, &twiddles, stack.rb_mut());
+                let duration = measure_n_runs(
+                    n_runs,
+                    algo,
+                    &mut buf,
+                    twiddles_init,
+                    twiddles,
+                    stack.rb_mut(),
+                );
 
                 if duration < MIN_DURATION {
                     n_runs *= 2;
@@ -159,7 +164,14 @@ pub(crate) fn measure_fastest(
         *avg = if n_runs <= init_n_runs {
             approx_duration
         } else {
-            let duration = measure_n_runs(n_runs, algo, &mut buf, &twiddles, stack.rb_mut());
+            let duration = measure_n_runs(
+                n_runs,
+                algo,
+                &mut buf,
+                twiddles_init,
+                twiddles,
+                stack.rb_mut(),
+            );
             duration_div_f64(duration, n_runs as f64)
         };
     }
@@ -178,8 +190,8 @@ pub(crate) fn measure_fastest(
 /// The size must be a power of two, and can be as large as `2^16` (inclusive).
 #[derive(Clone)]
 pub struct Plan {
-    fwd: unsafe fn(*mut c64, *mut c64, *const c64),
-    inv: unsafe fn(*mut c64, *mut c64, *const c64),
+    fwd: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
+    inv: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
     twiddles: ABox<[c64]>,
     twiddles_inv: ABox<[c64]>,
     algo: FftAlgo,
@@ -194,26 +206,26 @@ impl core::fmt::Debug for Plan {
     }
 }
 
+fn do_nothing(_: &mut [c64], _: &mut [c64], _: &[c64], _: &[c64]) {}
+
 pub(crate) fn get_fn_ptr(
     algo: FftAlgo,
     n: usize,
-) -> [unsafe fn(*mut c64, *mut c64, *const c64); 2] {
+) -> [fn(&mut [c64], &mut [c64], &[c64], &[c64]); 2] {
+    if n == 1 {
+        return [do_nothing; 2];
+    }
     use FftAlgo::*;
-
-    let fft = match algo {
-        Dif2 => dif2::runtime_fft(),
-        Dit2 => dit2::runtime_fft(),
-        Dif4 => dif4::runtime_fft(),
-        Dit4 => dit4::runtime_fft(),
-        Dif8 => dif8::runtime_fft(),
-        Dit8 => dit8::runtime_fft(),
-        Dif16 => dif16::runtime_fft(),
-        Dit16 => dit16::runtime_fft(),
-    };
-
-    let idx = n.trailing_zeros() as usize;
-
-    [fft.fwd[idx], fft.inv[idx]]
+    match algo {
+        Dif2 => dif2::fft_impl_dispatch(n),
+        Dit2 => dit2::fft_impl_dispatch(n),
+        Dif4 => dif4::fft_impl_dispatch(n),
+        Dit4 => dit4::fft_impl_dispatch(n),
+        Dif8 => dif8::fft_impl_dispatch(n),
+        Dit8 => dit8::fft_impl_dispatch(n),
+        Dif16 => dif16::fft_impl_dispatch(n),
+        Dit16 => dit16::fft_impl_dispatch(n),
+    }
 }
 
 impl Plan {
@@ -222,10 +234,9 @@ impl Plan {
     /// # Panics
     ///
     /// - Panics if `n` is not a power of two.
-    /// - Panics if `n` is greater than `2^16`.
+    /// - Panics if `n` is greater than `2^10`.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::ordered::{Method, Plan};
@@ -235,7 +246,7 @@ impl Plan {
     /// ```
     pub fn new(n: usize, method: Method) -> Self {
         assert!(n.is_power_of_two());
-        assert!(n.trailing_zeros() < 17);
+        assert!(n.trailing_zeros() < 11);
 
         let algo = match method {
             Method::UserProvided(algo) => algo,
@@ -244,7 +255,7 @@ impl Plan {
                 measure_fastest(
                     duration,
                     n,
-                    DynStack::new(&mut GlobalMemBuffer::new(measure_fastest_scratch(n))),
+                    PodStack::new(&mut GlobalPodBuffer::new(measure_fastest_scratch(n))),
                 )
                 .0
             }
@@ -274,7 +285,6 @@ impl Plan {
     /// Returns the vector size of the FFT.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::ordered::{Method, Plan};
@@ -304,7 +314,6 @@ impl Plan {
     /// Returns the size and alignment of the scratch memory needed to perform an FFT.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::ordered::{Method, Plan};
@@ -320,74 +329,61 @@ impl Plan {
     /// Performs a forward FFT in place, using the provided stack as scratch space.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::c64;
     /// use concrete_fft::ordered::{Method, Plan};
-    /// use dyn_stack::{DynStack, GlobalMemBuffer};
+    /// use dyn_stack::{PodStack, GlobalPodBuffer};
     /// use core::time::Duration;
     ///
     /// let plan = Plan::new(4, Method::Measure(Duration::from_millis(10)));
     ///
-    /// let mut memory = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-    /// let stack = DynStack::new(&mut memory);
+    /// let mut memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+    /// let stack = PodStack::new(&mut memory);
     ///
     /// let mut buf = [c64::default(); 4];
     /// plan.fwd(&mut buf, stack);
     /// ```
-    pub fn fwd(&self, buf: &mut [c64], stack: DynStack) {
+    pub fn fwd(&self, buf: &mut [c64], stack: PodStack) {
         let n = self.fft_size();
-        assert_eq!(n, buf.len());
-        let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, CACHELINE_ALIGN);
-        let buf = buf.as_mut_ptr();
-        let scratch = scratch.as_mut_ptr();
-        unsafe { (self.fwd)(buf, scratch as *mut c64, self.twiddles.as_ptr()) }
+        let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
+        let (w_init, w) = split_2(&self.twiddles);
+        (self.fwd)(buf, &mut scratch, w_init, w)
     }
 
     /// Performs an inverse FFT in place, using the provided stack as scratch space.
     ///
     /// # Example
-    ///
     #[cfg_attr(feature = "std", doc = " ```")]
     #[cfg_attr(not(feature = "std"), doc = " ```ignore")]
     /// use concrete_fft::c64;
     /// use concrete_fft::ordered::{Method, Plan};
-    /// use dyn_stack::{DynStack, GlobalMemBuffer, ReborrowMut};
+    /// use dyn_stack::{PodStack, GlobalPodBuffer, ReborrowMut};
     /// use core::time::Duration;
     ///
     /// let plan = Plan::new(4, Method::Measure(Duration::from_millis(10)));
     ///
-    /// let mut memory = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-    /// let mut stack = DynStack::new(&mut memory);
+    /// let mut memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+    /// let mut stack = PodStack::new(&mut memory);
     ///
     /// let mut buf = [c64::default(); 4];
     /// plan.fwd(&mut buf, stack.rb_mut());
     /// plan.inv(&mut buf, stack);
     /// ```
-    pub fn inv(&self, buf: &mut [c64], stack: DynStack) {
+    pub fn inv(&self, buf: &mut [c64], stack: PodStack) {
         let n = self.fft_size();
-        assert_eq!(n, buf.len());
-        let (mut scratch, _) = stack.make_aligned_uninit::<c64>(n, CACHELINE_ALIGN);
-        let buf = buf.as_mut_ptr();
-        let scratch = scratch.as_mut_ptr();
-        unsafe { (self.inv)(buf, scratch as *mut c64, self.twiddles_inv.as_ptr()) }
+        let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
+        let (w_init, w) = split_2(&self.twiddles_inv);
+        (self.inv)(buf, &mut scratch, w_init, w)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::dif16::*;
-    use crate::dif2::*;
-    use crate::dif4::*;
-    use crate::dif8::*;
-    use crate::dit16::*;
-    use crate::dit2::*;
-    use crate::dit4::*;
-    use crate::dit8::*;
-    use crate::fft_simd::init_wt;
-    use crate::x86_feature_detected;
+    use crate::{
+        c64, dif16, dif2, dif4, dif8, dit16, dit2, dit4, dit8,
+        fft_simd::{init_wt, FftSimd, Pod},
+    };
     use num_complex::ComplexFloat;
     use rand::random;
     use rustfft::FftPlanner;
@@ -395,107 +391,81 @@ mod tests {
     extern crate alloc;
     use alloc::vec;
 
-    #[test]
-    fn test_fft() {
-        unsafe {
-            for (can_run, r, arr) in [
-                (true, 2, &DIT2_SCALAR),
-                (true, 4, &DIT4_SCALAR),
-                (true, 8, &DIT8_SCALAR),
-                (true, 16, &DIT16_SCALAR),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 2, &DIT2_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 4, &DIT4_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 8, &DIT8_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 16, &DIT16_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 2, &DIT2_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 4, &DIT4_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 8, &DIT8_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 16, &DIT16_FMA),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 4, &DIT4_AVX512),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 8, &DIT8_AVX512),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 16, &DIT16_AVX512),
-                (true, 2, &DIF2_SCALAR),
-                (true, 4, &DIF4_SCALAR),
-                (true, 8, &DIF8_SCALAR),
-                (true, 16, &DIF16_SCALAR),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 2, &DIF2_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 4, &DIF4_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 8, &DIF8_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("avx"), 16, &DIF16_AVX),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 2, &DIF2_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 4, &DIF4_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 8, &DIF8_FMA),
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-                (x86_feature_detected!("fma"), 16, &DIF16_FMA),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 4, &DIF4_AVX512),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 8, &DIF8_AVX512),
-                #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-                (x86_feature_detected!("avx512f"), 16, &DIF16_AVX512),
-            ] {
-                if can_run {
-                    for exp in 0..17 {
-                        let n: usize = 1 << exp;
-                        let fwd = arr.fwd[n.trailing_zeros() as usize];
-                        let inv = arr.inv[n.trailing_zeros() as usize];
+    fn test_fft_simd<c64xN: Pod>(simd: impl FftSimd<c64xN>) {
+        for (r, fft) in [
+            (2, dif2::fft_impl(simd)),
+            (2, dit2::fft_impl(simd)),
+            (4, dif4::fft_impl(simd)),
+            (4, dit4::fft_impl(simd)),
+            (8, dif8::fft_impl(simd)),
+            (8, dit8::fft_impl(simd)),
+            (16, dif16::fft_impl(simd)),
+            (16, dit16::fft_impl(simd)),
+        ] {
+            if simd.lane_count() > r {
+                continue;
+            }
 
-                        let mut scratch = vec![c64::default(); n];
-                        let mut twiddles = vec![c64::default(); 2 * n];
-                        let mut twiddles_inv = vec![c64::default(); 2 * n];
+            for exp in 1..=10 {
+                let n: usize = 1 << exp;
+                if simd.lane_count() > 1 && simd.lane_count() * r > n {
+                    continue;
+                }
 
-                        init_wt(r, n, &mut twiddles, &mut twiddles_inv);
+                let [fwd, inv] = fft.make_fn_ptr(n);
 
-                        let mut x = vec![c64::default(); n];
-                        for z in &mut x {
-                            *z = c64::new(random(), random());
-                        }
+                fn test_inner(
+                    n: usize,
+                    r: usize,
+                    fwd: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
+                    inv: fn(&mut [c64], &mut [c64], &[c64], &[c64]),
+                ) {
+                    let mut scratch = vec![c64::default(); n];
+                    let mut twiddles = vec![c64::default(); 2 * n];
+                    let mut twiddles_inv = vec![c64::default(); 2 * n];
+                    init_wt(r, n, &mut twiddles, &mut twiddles_inv);
+                    let mut x = vec![c64::default(); n];
+                    for z in &mut x {
+                        *z = c64::new(random(), random());
+                    }
+                    let orig = x.clone();
+                    fwd(&mut x, &mut scratch, &twiddles[..n], &twiddles[n..]);
+                    // compare with rustfft
+                    {
+                        let mut planner = FftPlanner::new();
+                        let plan = planner.plan_fft_forward(n);
+                        let mut y = orig.clone();
+                        plan.process(&mut y);
 
-                        let orig = x.clone();
-
-                        fwd(x.as_mut_ptr(), scratch.as_mut_ptr(), twiddles.as_ptr());
-
-                        // compare with rustfft
-                        {
-                            let mut planner = FftPlanner::new();
-                            let plan = planner.plan_fft_forward(n);
-                            let mut y = orig.clone();
-                            plan.process(&mut y);
-
-                            for (z_expected, z_actual) in y.iter().zip(&x) {
-                                assert!((*z_expected - *z_actual).abs() < 1e-12);
-                            }
-                        }
-
-                        inv(x.as_mut_ptr(), scratch.as_mut_ptr(), twiddles_inv.as_ptr());
-
-                        for z in &mut x {
-                            *z /= n as f64;
-                        }
-
-                        for (z_expected, z_actual) in orig.iter().zip(&x) {
-                            assert!((*z_expected - *z_actual).abs() < 1e-14);
+                        for (z_expected, z_actual) in y.iter().zip(&x) {
+                            assert!((*z_expected - *z_actual).abs() < 1e-12);
                         }
                     }
+                    inv(&mut x, &mut scratch, &twiddles_inv[..n], &twiddles_inv[n..]);
+                    for z in &mut x {
+                        *z /= n as f64;
+                    }
+                    for (z_expected, z_actual) in orig.iter().zip(&x) {
+                        assert!((*z_expected - *z_actual).abs() < 1e-14);
+                    }
                 }
+
+                test_inner(n, r, fwd, inv);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fft() {
+        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        {
+            test_fft_simd(crate::fft_simd::Scalar);
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                test_fft_simd(simd);
+            }
+            #[cfg(feature = "nightly")]
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                test_fft_simd(simd);
             }
         }
     }

@@ -1,1116 +1,887 @@
-// Copyright (c) 2019 OK Ojisan(Takuya OKAHISA)
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
-use crate::c64;
-use crate::dit4::{end_2, end_4};
-use crate::dit8::end_8;
-use crate::fft_simd::{twid, twid_t, FftSimd64, FftSimd64Ext, FftSimd64X2, FftSimd64X4, Scalar};
-use crate::x86_feature_detected;
+use crate::{
+    c64,
+    dif16::{split_16, split_mut_16},
+    fft_simd::{FftSimd, FftSimdExt, Pod},
+    fn_ptr, nat, RecursiveFft,
+};
 
 #[inline(always)]
-unsafe fn core_<I: FftSimd64>(
+fn stockham_core_1x2<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
     fwd: bool,
-    n: usize,
     s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
+    x: &mut [c64xN],
+    y: &[c64xN],
+    w_init: &[c64xN],
+    _w: &[c64],
 ) {
-    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
+    assert_eq!(s, 1);
 
-    let m = n / 16;
-    let big_n = n * s;
-    let big_n0 = 0;
-    let big_n1 = big_n / 16;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-    let big_n4 = big_n1 * 4;
-    let big_n5 = big_n1 * 5;
-    let big_n6 = big_n1 * 6;
-    let big_n7 = big_n1 * 7;
-    let big_n8 = big_n1 * 8;
-    let big_n9 = big_n1 * 9;
-    let big_na = big_n1 * 10;
-    let big_nb = big_n1 * 11;
-    let big_nc = big_n1 * 12;
-    let big_nd = big_n1 * 13;
-    let big_ne = big_n1 * 14;
-    let big_nf = big_n1 * 15;
+    let y = pulp::as_arrays::<16, _>(y).0;
+    let (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf) = split_mut_16(x);
+    let (_, w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf) = split_16(w_init);
 
-    for p in 0..m {
-        let sp = s * p;
-        let s16p = 16 * sp;
+    for (
+        (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+        y,
+        (w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf),
+    ) in izip!(
+        izip!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+        y,
+        izip!(w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf),
+    ) {
+        let w1 = *w1;
+        let w2 = *w2;
+        let w3 = *w3;
+        let w4 = *w4;
+        let w5 = *w5;
+        let w6 = *w6;
+        let w7 = *w7;
+        let w8 = *w8;
+        let w9 = *w9;
+        let wa = *wa;
+        let wb = *wb;
+        let wc = *wc;
+        let wd = *wd;
+        let we = *we;
+        let wf = *wf;
 
-        let w1p = I::splat(twid_t(16, big_n, 0x1, w, sp));
-        let w2p = I::splat(twid_t(16, big_n, 0x2, w, sp));
-        let w3p = I::splat(twid_t(16, big_n, 0x3, w, sp));
-        let w4p = I::splat(twid_t(16, big_n, 0x4, w, sp));
-        let w5p = I::splat(twid_t(16, big_n, 0x5, w, sp));
-        let w6p = I::splat(twid_t(16, big_n, 0x6, w, sp));
-        let w7p = I::splat(twid_t(16, big_n, 0x7, w, sp));
-        let w8p = I::splat(twid_t(16, big_n, 0x8, w, sp));
-        let w9p = I::splat(twid_t(16, big_n, 0x9, w, sp));
-        let wap = I::splat(twid_t(16, big_n, 0xa, w, sp));
-        let wbp = I::splat(twid_t(16, big_n, 0xb, w, sp));
-        let wcp = I::splat(twid_t(16, big_n, 0xc, w, sp));
-        let wdp = I::splat(twid_t(16, big_n, 0xd, w, sp));
-        let wep = I::splat(twid_t(16, big_n, 0xe, w, sp));
-        let wfp = I::splat(twid_t(16, big_n, 0xf, w, sp));
+        let ab_0 = y[0x0];
+        let cd_0 = y[0x1];
+        let ef_0 = y[0x2];
+        let gh_0 = y[0x3];
+        let ij_0 = y[0x4];
+        let kl_0 = y[0x5];
+        let mn_0 = y[0x6];
+        let op_0 = y[0x7];
+        let ab_1 = y[0x8];
+        let cd_1 = y[0x9];
+        let ef_1 = y[0xa];
+        let gh_1 = y[0xb];
+        let ij_1 = y[0xc];
+        let kl_1 = y[0xd];
+        let mn_1 = y[0xe];
+        let op_1 = y[0xf];
 
-        let mut q = 0;
-        while q < s {
-            let xq_sp = x.add(q + sp);
-            let yq_s16p = y.add(q + s16p);
+        let y0 = simd.catlo(ab_0, ab_1);
+        let y1 = simd.mul(w1, simd.cathi(ab_0, ab_1));
+        let y2 = simd.mul(w2, simd.catlo(cd_0, cd_1));
+        let y3 = simd.mul(w3, simd.cathi(cd_0, cd_1));
+        let y4 = simd.mul(w4, simd.catlo(ef_0, ef_1));
+        let y5 = simd.mul(w5, simd.cathi(ef_0, ef_1));
+        let y6 = simd.mul(w6, simd.catlo(gh_0, gh_1));
+        let y7 = simd.mul(w7, simd.cathi(gh_0, gh_1));
 
-            let y0 = I::load(yq_s16p.add(0));
-            let y1 = I::mul(w1p, I::load(yq_s16p.add(s)));
-            let y2 = I::mul(w2p, I::load(yq_s16p.add(s * 0x2)));
-            let y3 = I::mul(w3p, I::load(yq_s16p.add(s * 0x3)));
-            let y4 = I::mul(w4p, I::load(yq_s16p.add(s * 0x4)));
-            let y5 = I::mul(w5p, I::load(yq_s16p.add(s * 0x5)));
-            let y6 = I::mul(w6p, I::load(yq_s16p.add(s * 0x6)));
-            let y7 = I::mul(w7p, I::load(yq_s16p.add(s * 0x7)));
-            let y8 = I::mul(w8p, I::load(yq_s16p.add(s * 0x8)));
-            let y9 = I::mul(w9p, I::load(yq_s16p.add(s * 0x9)));
-            let ya = I::mul(wap, I::load(yq_s16p.add(s * 0xa)));
-            let yb = I::mul(wbp, I::load(yq_s16p.add(s * 0xb)));
-            let yc = I::mul(wcp, I::load(yq_s16p.add(s * 0xc)));
-            let yd = I::mul(wdp, I::load(yq_s16p.add(s * 0xd)));
-            let ye = I::mul(wep, I::load(yq_s16p.add(s * 0xe)));
-            let yf = I::mul(wfp, I::load(yq_s16p.add(s * 0xf)));
+        let y8 = simd.mul(w8, simd.catlo(ij_0, ij_1));
+        let y9 = simd.mul(w9, simd.cathi(ij_0, ij_1));
+        let ya = simd.mul(wa, simd.catlo(kl_0, kl_1));
+        let yb = simd.mul(wb, simd.cathi(kl_0, kl_1));
+        let yc = simd.mul(wc, simd.catlo(mn_0, mn_1));
+        let yd = simd.mul(wd, simd.cathi(mn_0, mn_1));
+        let ye = simd.mul(we, simd.catlo(op_0, op_1));
+        let yf = simd.mul(wf, simd.cathi(op_0, op_1));
 
-            let a08 = I::add(y0, y8);
-            let s08 = I::sub(y0, y8);
-            let a4c = I::add(y4, yc);
-            let s4c = I::sub(y4, yc);
-            let a2a = I::add(y2, ya);
-            let s2a = I::sub(y2, ya);
-            let a6e = I::add(y6, ye);
-            let s6e = I::sub(y6, ye);
-            let a19 = I::add(y1, y9);
-            let s19 = I::sub(y1, y9);
-            let a5d = I::add(y5, yd);
-            let s5d = I::sub(y5, yd);
-            let a3b = I::add(y3, yb);
-            let s3b = I::sub(y3, yb);
-            let a7f = I::add(y7, yf);
-            let s7f = I::sub(y7, yf);
+        let a08 = simd.add(y0, y8);
+        let s08 = simd.sub(y0, y8);
+        let a4c = simd.add(y4, yc);
+        let s4c = simd.sub(y4, yc);
+        let a2a = simd.add(y2, ya);
+        let s2a = simd.sub(y2, ya);
+        let a6e = simd.add(y6, ye);
+        let s6e = simd.sub(y6, ye);
+        let a19 = simd.add(y1, y9);
+        let s19 = simd.sub(y1, y9);
+        let a5d = simd.add(y5, yd);
+        let s5d = simd.sub(y5, yd);
+        let a3b = simd.add(y3, yb);
+        let s3b = simd.sub(y3, yb);
+        let a7f = simd.add(y7, yf);
+        let s7f = simd.sub(y7, yf);
 
-            let js4c = I::xpj(fwd, s4c);
-            let js6e = I::xpj(fwd, s6e);
-            let js5d = I::xpj(fwd, s5d);
-            let js7f = I::xpj(fwd, s7f);
+        let js4c = simd.mul_j(fwd, s4c);
+        let js6e = simd.mul_j(fwd, s6e);
+        let js5d = simd.mul_j(fwd, s5d);
+        let js7f = simd.mul_j(fwd, s7f);
 
-            let a08p1a4c = I::add(a08, a4c);
-            let s08mjs4c = I::sub(s08, js4c);
-            let a08m1a4c = I::sub(a08, a4c);
-            let s08pjs4c = I::add(s08, js4c);
-            let a2ap1a6e = I::add(a2a, a6e);
-            let s2amjs6e = I::sub(s2a, js6e);
-            let a2am1a6e = I::sub(a2a, a6e);
-            let s2apjs6e = I::add(s2a, js6e);
-            let a19p1a5d = I::add(a19, a5d);
-            let s19mjs5d = I::sub(s19, js5d);
-            let a19m1a5d = I::sub(a19, a5d);
-            let s19pjs5d = I::add(s19, js5d);
-            let a3bp1a7f = I::add(a3b, a7f);
-            let s3bmjs7f = I::sub(s3b, js7f);
-            let a3bm1a7f = I::sub(a3b, a7f);
-            let s3bpjs7f = I::add(s3b, js7f);
+        let a08p1a4c = simd.add(a08, a4c);
+        let s08mjs4c = simd.sub(s08, js4c);
+        let a08m1a4c = simd.sub(a08, a4c);
+        let s08pjs4c = simd.add(s08, js4c);
+        let a2ap1a6e = simd.add(a2a, a6e);
+        let s2amjs6e = simd.sub(s2a, js6e);
+        let a2am1a6e = simd.sub(a2a, a6e);
+        let s2apjs6e = simd.add(s2a, js6e);
+        let a19p1a5d = simd.add(a19, a5d);
+        let s19mjs5d = simd.sub(s19, js5d);
+        let a19m1a5d = simd.sub(a19, a5d);
+        let s19pjs5d = simd.add(s19, js5d);
+        let a3bp1a7f = simd.add(a3b, a7f);
+        let s3bmjs7f = simd.sub(s3b, js7f);
+        let a3bm1a7f = simd.sub(a3b, a7f);
+        let s3bpjs7f = simd.add(s3b, js7f);
 
-            let w8_s2amjs6e = I::xw8(fwd, s2amjs6e);
-            let j_a2am1a6e = I::xpj(fwd, a2am1a6e);
-            let v8_s2apjs6e = I::xv8(fwd, s2apjs6e);
+        let w8_s2amjs6e = simd.mul_exp_neg_pi_over_8(fwd, s2amjs6e);
+        let j_a2am1a6e = simd.mul_j(fwd, a2am1a6e);
+        let v8_s2apjs6e = simd.mul_exp_pi_over_8(fwd, s2apjs6e);
 
-            let a08p1a4c_p1_a2ap1a6e = I::add(a08p1a4c, a2ap1a6e);
-            let s08mjs4c_pw_s2amjs6e = I::add(s08mjs4c, w8_s2amjs6e);
-            let a08m1a4c_mj_a2am1a6e = I::sub(a08m1a4c, j_a2am1a6e);
-            let s08pjs4c_mv_s2apjs6e = I::sub(s08pjs4c, v8_s2apjs6e);
-            let a08p1a4c_m1_a2ap1a6e = I::sub(a08p1a4c, a2ap1a6e);
-            let s08mjs4c_mw_s2amjs6e = I::sub(s08mjs4c, w8_s2amjs6e);
-            let a08m1a4c_pj_a2am1a6e = I::add(a08m1a4c, j_a2am1a6e);
-            let s08pjs4c_pv_s2apjs6e = I::add(s08pjs4c, v8_s2apjs6e);
+        let a08p1a4c_p1_a2ap1a6e = simd.add(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_pw_s2amjs6e = simd.add(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_mj_a2am1a6e = simd.sub(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_mv_s2apjs6e = simd.sub(s08pjs4c, v8_s2apjs6e);
+        let a08p1a4c_m1_a2ap1a6e = simd.sub(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_mw_s2amjs6e = simd.sub(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_pj_a2am1a6e = simd.add(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_pv_s2apjs6e = simd.add(s08pjs4c, v8_s2apjs6e);
 
-            let w8_s3bmjs7f = I::xw8(fwd, s3bmjs7f);
-            let j_a3bm1a7f = I::xpj(fwd, a3bm1a7f);
-            let v8_s3bpjs7f = I::xv8(fwd, s3bpjs7f);
+        let w8_s3bmjs7f = simd.mul_exp_neg_pi_over_8(fwd, s3bmjs7f);
+        let j_a3bm1a7f = simd.mul_j(fwd, a3bm1a7f);
+        let v8_s3bpjs7f = simd.mul_exp_pi_over_8(fwd, s3bpjs7f);
 
-            let a19p1a5d_p1_a3bp1a7f = I::add(a19p1a5d, a3bp1a7f);
-            let s19mjs5d_pw_s3bmjs7f = I::add(s19mjs5d, w8_s3bmjs7f);
-            let a19m1a5d_mj_a3bm1a7f = I::sub(a19m1a5d, j_a3bm1a7f);
-            let s19pjs5d_mv_s3bpjs7f = I::sub(s19pjs5d, v8_s3bpjs7f);
-            let a19p1a5d_m1_a3bp1a7f = I::sub(a19p1a5d, a3bp1a7f);
-            let s19mjs5d_mw_s3bmjs7f = I::sub(s19mjs5d, w8_s3bmjs7f);
-            let a19m1a5d_pj_a3bm1a7f = I::add(a19m1a5d, j_a3bm1a7f);
-            let s19pjs5d_pv_s3bpjs7f = I::add(s19pjs5d, v8_s3bpjs7f);
+        let a19p1a5d_p1_a3bp1a7f = simd.add(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_pw_s3bmjs7f = simd.add(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_mj_a3bm1a7f = simd.sub(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_mv_s3bpjs7f = simd.sub(s19pjs5d, v8_s3bpjs7f);
+        let a19p1a5d_m1_a3bp1a7f = simd.sub(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_mw_s3bmjs7f = simd.sub(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_pj_a3bm1a7f = simd.add(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_pv_s3bpjs7f = simd.add(s19pjs5d, v8_s3bpjs7f);
 
-            I::store(
-                xq_sp.add(big_n0),
-                I::add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-            );
-            I::store(
-                xq_sp.add(big_n8),
-                I::sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-            );
+        *x0 = simd.add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+        *x8 = simd.sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
 
-            let h1_s19mjs5d_pw_s3bmjs7f = I::xh1(fwd, s19mjs5d_pw_s3bmjs7f);
-            I::store(
-                xq_sp.add(big_n1),
-                I::add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-            );
-            I::store(
-                xq_sp.add(big_n9),
-                I::sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-            );
+        let h1_s19mjs5d_pw_s3bmjs7f = simd.mul_exp_pi_over_16(fwd, s19mjs5d_pw_s3bmjs7f);
+        *x1 = simd.add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
+        *x9 = simd.sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
 
-            let w8_a19m1a5d_mj_a3bm1a7f = I::xw8(fwd, a19m1a5d_mj_a3bm1a7f);
-            I::store(
-                xq_sp.add(big_n2),
-                I::add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-            );
-            I::store(
-                xq_sp.add(big_na),
-                I::sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-            );
+        let w8_a19m1a5d_mj_a3bm1a7f = simd.mul_exp_neg_pi_over_8(fwd, a19m1a5d_mj_a3bm1a7f);
+        *x2 = simd.add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
+        *xa = simd.sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
 
-            let h3_s19pjs5d_mv_s3bpjs7f = I::xh3(fwd, s19pjs5d_mv_s3bpjs7f);
-            I::store(
-                xq_sp.add(big_n3),
-                I::add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-            );
-            I::store(
-                xq_sp.add(big_nb),
-                I::sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-            );
+        let h3_s19pjs5d_mv_s3bpjs7f = simd.mul_exp_17pi_over_16(fwd, s19pjs5d_mv_s3bpjs7f);
+        *x3 = simd.add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
+        *xb = simd.sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
 
-            let j_a19p1a5d_m1_a3bp1a7f = I::xpj(fwd, a19p1a5d_m1_a3bp1a7f);
-            I::store(
-                xq_sp.add(big_n4),
-                I::sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-            );
-            I::store(
-                xq_sp.add(big_nc),
-                I::add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-            );
+        let j_a19p1a5d_m1_a3bp1a7f = simd.mul_j(fwd, a19p1a5d_m1_a3bp1a7f);
+        *x4 = simd.sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
+        *xc = simd.add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
 
-            let hd_s19mjs5d_mw_s3bmjs7f = I::xhd(fwd, s19mjs5d_mw_s3bmjs7f);
-            I::store(
-                xq_sp.add(big_n5),
-                I::sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-            );
-            I::store(
-                xq_sp.add(big_nd),
-                I::add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-            );
+        let hd_s19mjs5d_mw_s3bmjs7f = simd.mul_exp_neg_17pi_over_16(fwd, s19mjs5d_mw_s3bmjs7f);
+        *x5 = simd.sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
+        *xd = simd.add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
 
-            let v8_a19m1a5d_pj_a3bm1a7f = I::xv8(fwd, a19m1a5d_pj_a3bm1a7f);
-            I::store(
-                xq_sp.add(big_n6),
-                I::sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-            );
-            I::store(
-                xq_sp.add(big_ne),
-                I::add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-            );
+        let v8_a19m1a5d_pj_a3bm1a7f = simd.mul_exp_pi_over_8(fwd, a19m1a5d_pj_a3bm1a7f);
+        *x6 = simd.sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
+        *xe = simd.add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
 
-            let hf_s19pjs5d_pv_s3bpjs7f = I::xhf(fwd, s19pjs5d_pv_s3bpjs7f);
-            I::store(
-                xq_sp.add(big_n7),
-                I::sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-            );
-            I::store(
-                xq_sp.add(big_nf),
-                I::add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-            );
+        let hf_s19pjs5d_pv_s3bpjs7f = simd.mul_exp_neg_pi_over_16(fwd, s19pjs5d_pv_s3bpjs7f);
+        *x7 = simd.sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
+        *xf = simd.add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
+    }
+}
 
-            q += I::COMPLEX_PER_REG;
+#[inline(always)]
+fn stockham_core_1x4<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    fwd: bool,
+    s: usize,
+    x: &mut [c64xN],
+    y: &[c64xN],
+    w_init: &[c64xN],
+    _w: &[c64],
+) {
+    assert_eq!(s, 1);
+
+    let y = pulp::as_arrays::<16, _>(y).0;
+    let (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf) = split_mut_16(x);
+    let (_, w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf) = split_16(w_init);
+
+    for (
+        (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+        y,
+        (w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf),
+    ) in izip!(
+        izip!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+        y,
+        izip!(w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf),
+    ) {
+        let w1 = *w1;
+        let w2 = *w2;
+        let w3 = *w3;
+        let w4 = *w4;
+        let w5 = *w5;
+        let w6 = *w6;
+        let w7 = *w7;
+        let w8 = *w8;
+        let w9 = *w9;
+        let wa = *wa;
+        let wb = *wb;
+        let wc = *wc;
+        let wd = *wd;
+        let we = *we;
+        let wf = *wf;
+
+        let abcd0 = y[0x0];
+        let efgh0 = y[0x1];
+        let ijkl0 = y[0x2];
+        let mnop0 = y[0x3];
+
+        let abcd1 = y[0x4];
+        let efgh1 = y[0x5];
+        let ijkl1 = y[0x6];
+        let mnop1 = y[0x7];
+
+        let abcd2 = y[0x8];
+        let efgh2 = y[0x9];
+        let ijkl2 = y[0xa];
+        let mnop2 = y[0xb];
+
+        let abcd3 = y[0xc];
+        let efgh3 = y[0xd];
+        let ijkl3 = y[0xe];
+        let mnop3 = y[0xf];
+
+        let (a_, b_, c_, d_) = simd.transpose(abcd0, abcd1, abcd2, abcd3);
+        let (e_, f_, g_, h_) = simd.transpose(efgh0, efgh1, efgh2, efgh3);
+        let (i_, j_, k_, l_) = simd.transpose(ijkl0, ijkl1, ijkl2, ijkl3);
+        let (m_, n_, o_, p_) = simd.transpose(mnop0, mnop1, mnop2, mnop3);
+
+        let y0 = a_;
+        let y1 = simd.mul(w1, b_);
+        let y2 = simd.mul(w2, c_);
+        let y3 = simd.mul(w3, d_);
+        let y4 = simd.mul(w4, e_);
+        let y5 = simd.mul(w5, f_);
+        let y6 = simd.mul(w6, g_);
+        let y7 = simd.mul(w7, h_);
+
+        let y8 = simd.mul(w8, i_);
+        let y9 = simd.mul(w9, j_);
+        let ya = simd.mul(wa, k_);
+        let yb = simd.mul(wb, l_);
+        let yc = simd.mul(wc, m_);
+        let yd = simd.mul(wd, n_);
+        let ye = simd.mul(we, o_);
+        let yf = simd.mul(wf, p_);
+
+        let a08 = simd.add(y0, y8);
+        let s08 = simd.sub(y0, y8);
+        let a4c = simd.add(y4, yc);
+        let s4c = simd.sub(y4, yc);
+        let a2a = simd.add(y2, ya);
+        let s2a = simd.sub(y2, ya);
+        let a6e = simd.add(y6, ye);
+        let s6e = simd.sub(y6, ye);
+        let a19 = simd.add(y1, y9);
+        let s19 = simd.sub(y1, y9);
+        let a5d = simd.add(y5, yd);
+        let s5d = simd.sub(y5, yd);
+        let a3b = simd.add(y3, yb);
+        let s3b = simd.sub(y3, yb);
+        let a7f = simd.add(y7, yf);
+        let s7f = simd.sub(y7, yf);
+
+        let js4c = simd.mul_j(fwd, s4c);
+        let js6e = simd.mul_j(fwd, s6e);
+        let js5d = simd.mul_j(fwd, s5d);
+        let js7f = simd.mul_j(fwd, s7f);
+
+        let a08p1a4c = simd.add(a08, a4c);
+        let s08mjs4c = simd.sub(s08, js4c);
+        let a08m1a4c = simd.sub(a08, a4c);
+        let s08pjs4c = simd.add(s08, js4c);
+        let a2ap1a6e = simd.add(a2a, a6e);
+        let s2amjs6e = simd.sub(s2a, js6e);
+        let a2am1a6e = simd.sub(a2a, a6e);
+        let s2apjs6e = simd.add(s2a, js6e);
+        let a19p1a5d = simd.add(a19, a5d);
+        let s19mjs5d = simd.sub(s19, js5d);
+        let a19m1a5d = simd.sub(a19, a5d);
+        let s19pjs5d = simd.add(s19, js5d);
+        let a3bp1a7f = simd.add(a3b, a7f);
+        let s3bmjs7f = simd.sub(s3b, js7f);
+        let a3bm1a7f = simd.sub(a3b, a7f);
+        let s3bpjs7f = simd.add(s3b, js7f);
+
+        let w8_s2amjs6e = simd.mul_exp_neg_pi_over_8(fwd, s2amjs6e);
+        let j_a2am1a6e = simd.mul_j(fwd, a2am1a6e);
+        let v8_s2apjs6e = simd.mul_exp_pi_over_8(fwd, s2apjs6e);
+
+        let a08p1a4c_p1_a2ap1a6e = simd.add(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_pw_s2amjs6e = simd.add(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_mj_a2am1a6e = simd.sub(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_mv_s2apjs6e = simd.sub(s08pjs4c, v8_s2apjs6e);
+        let a08p1a4c_m1_a2ap1a6e = simd.sub(a08p1a4c, a2ap1a6e);
+        let s08mjs4c_mw_s2amjs6e = simd.sub(s08mjs4c, w8_s2amjs6e);
+        let a08m1a4c_pj_a2am1a6e = simd.add(a08m1a4c, j_a2am1a6e);
+        let s08pjs4c_pv_s2apjs6e = simd.add(s08pjs4c, v8_s2apjs6e);
+
+        let w8_s3bmjs7f = simd.mul_exp_neg_pi_over_8(fwd, s3bmjs7f);
+        let j_a3bm1a7f = simd.mul_j(fwd, a3bm1a7f);
+        let v8_s3bpjs7f = simd.mul_exp_pi_over_8(fwd, s3bpjs7f);
+
+        let a19p1a5d_p1_a3bp1a7f = simd.add(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_pw_s3bmjs7f = simd.add(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_mj_a3bm1a7f = simd.sub(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_mv_s3bpjs7f = simd.sub(s19pjs5d, v8_s3bpjs7f);
+        let a19p1a5d_m1_a3bp1a7f = simd.sub(a19p1a5d, a3bp1a7f);
+        let s19mjs5d_mw_s3bmjs7f = simd.sub(s19mjs5d, w8_s3bmjs7f);
+        let a19m1a5d_pj_a3bm1a7f = simd.add(a19m1a5d, j_a3bm1a7f);
+        let s19pjs5d_pv_s3bpjs7f = simd.add(s19pjs5d, v8_s3bpjs7f);
+
+        *x0 = simd.add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+        *x8 = simd.sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+
+        let h1_s19mjs5d_pw_s3bmjs7f = simd.mul_exp_pi_over_16(fwd, s19mjs5d_pw_s3bmjs7f);
+        *x1 = simd.add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
+        *x9 = simd.sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
+
+        let w8_a19m1a5d_mj_a3bm1a7f = simd.mul_exp_neg_pi_over_8(fwd, a19m1a5d_mj_a3bm1a7f);
+        *x2 = simd.add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
+        *xa = simd.sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
+
+        let h3_s19pjs5d_mv_s3bpjs7f = simd.mul_exp_17pi_over_16(fwd, s19pjs5d_mv_s3bpjs7f);
+        *x3 = simd.add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
+        *xb = simd.sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
+
+        let j_a19p1a5d_m1_a3bp1a7f = simd.mul_j(fwd, a19p1a5d_m1_a3bp1a7f);
+        *x4 = simd.sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
+        *xc = simd.add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
+
+        let hd_s19mjs5d_mw_s3bmjs7f = simd.mul_exp_neg_17pi_over_16(fwd, s19mjs5d_mw_s3bmjs7f);
+        *x5 = simd.sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
+        *xd = simd.add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
+
+        let v8_a19m1a5d_pj_a3bm1a7f = simd.mul_exp_pi_over_8(fwd, a19m1a5d_pj_a3bm1a7f);
+        *x6 = simd.sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
+        *xe = simd.add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
+
+        let hf_s19pjs5d_pv_s3bpjs7f = simd.mul_exp_neg_pi_over_16(fwd, s19pjs5d_pv_s3bpjs7f);
+        *x7 = simd.sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
+        *xf = simd.add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
+    }
+}
+
+#[inline(always)]
+fn stockham_core_generic<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    fwd: bool,
+    s: usize,
+    x: &mut [c64xN],
+    y: &[c64xN],
+    _w_init: &[c64xN],
+    w: &[c64],
+) {
+    assert_eq!(s % simd.lane_count(), 0);
+    let simd_s = s / simd.lane_count();
+
+    let w = pulp::as_arrays::<16, _>(w).0;
+
+    let (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf) = split_mut_16(x);
+
+    for ((x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf), y, w) in izip!(
+        izip!(
+            x0.chunks_exact_mut(simd_s),
+            x1.chunks_exact_mut(simd_s),
+            x2.chunks_exact_mut(simd_s),
+            x3.chunks_exact_mut(simd_s),
+            x4.chunks_exact_mut(simd_s),
+            x5.chunks_exact_mut(simd_s),
+            x6.chunks_exact_mut(simd_s),
+            x7.chunks_exact_mut(simd_s),
+            x8.chunks_exact_mut(simd_s),
+            x9.chunks_exact_mut(simd_s),
+            xa.chunks_exact_mut(simd_s),
+            xb.chunks_exact_mut(simd_s),
+            xc.chunks_exact_mut(simd_s),
+            xd.chunks_exact_mut(simd_s),
+            xe.chunks_exact_mut(simd_s),
+            xf.chunks_exact_mut(simd_s),
+        ),
+        y.chunks_exact(16 * simd_s),
+        w.chunks_exact(s),
+    ) {
+        let [_, w1, w2, w3, w4, w5, w6, w7, w8, w9, wa, wb, wc, wd, we, wf] = w[0];
+
+        let w1 = simd.splat(w1);
+        let w2 = simd.splat(w2);
+        let w3 = simd.splat(w3);
+        let w4 = simd.splat(w4);
+        let w5 = simd.splat(w5);
+        let w6 = simd.splat(w6);
+        let w7 = simd.splat(w7);
+        let w8 = simd.splat(w8);
+        let w9 = simd.splat(w9);
+        let wa = simd.splat(wa);
+        let wb = simd.splat(wb);
+        let wc = simd.splat(wc);
+        let wd = simd.splat(wd);
+        let we = simd.splat(we);
+        let wf = simd.splat(wf);
+
+        let (y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf) = split_16(y);
+
+        for (
+            (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+            (y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf),
+        ) in izip!(
+            izip!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+            izip!(y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf),
+        ) {
+            let y0 = *y0;
+            let y1 = simd.mul(w1, *y1);
+            let y2 = simd.mul(w2, *y2);
+            let y3 = simd.mul(w3, *y3);
+            let y4 = simd.mul(w4, *y4);
+            let y5 = simd.mul(w5, *y5);
+            let y6 = simd.mul(w6, *y6);
+            let y7 = simd.mul(w7, *y7);
+            let y8 = simd.mul(w8, *y8);
+            let y9 = simd.mul(w9, *y9);
+            let ya = simd.mul(wa, *ya);
+            let yb = simd.mul(wb, *yb);
+            let yc = simd.mul(wc, *yc);
+            let yd = simd.mul(wd, *yd);
+            let ye = simd.mul(we, *ye);
+            let yf = simd.mul(wf, *yf);
+
+            let a08 = simd.add(y0, y8);
+            let s08 = simd.sub(y0, y8);
+            let a4c = simd.add(y4, yc);
+            let s4c = simd.sub(y4, yc);
+            let a2a = simd.add(y2, ya);
+            let s2a = simd.sub(y2, ya);
+            let a6e = simd.add(y6, ye);
+            let s6e = simd.sub(y6, ye);
+            let a19 = simd.add(y1, y9);
+            let s19 = simd.sub(y1, y9);
+            let a5d = simd.add(y5, yd);
+            let s5d = simd.sub(y5, yd);
+            let a3b = simd.add(y3, yb);
+            let s3b = simd.sub(y3, yb);
+            let a7f = simd.add(y7, yf);
+            let s7f = simd.sub(y7, yf);
+
+            let js4c = simd.mul_j(fwd, s4c);
+            let js6e = simd.mul_j(fwd, s6e);
+            let js5d = simd.mul_j(fwd, s5d);
+            let js7f = simd.mul_j(fwd, s7f);
+
+            let a08p1a4c = simd.add(a08, a4c);
+            let s08mjs4c = simd.sub(s08, js4c);
+            let a08m1a4c = simd.sub(a08, a4c);
+            let s08pjs4c = simd.add(s08, js4c);
+            let a2ap1a6e = simd.add(a2a, a6e);
+            let s2amjs6e = simd.sub(s2a, js6e);
+            let a2am1a6e = simd.sub(a2a, a6e);
+            let s2apjs6e = simd.add(s2a, js6e);
+            let a19p1a5d = simd.add(a19, a5d);
+            let s19mjs5d = simd.sub(s19, js5d);
+            let a19m1a5d = simd.sub(a19, a5d);
+            let s19pjs5d = simd.add(s19, js5d);
+            let a3bp1a7f = simd.add(a3b, a7f);
+            let s3bmjs7f = simd.sub(s3b, js7f);
+            let a3bm1a7f = simd.sub(a3b, a7f);
+            let s3bpjs7f = simd.add(s3b, js7f);
+
+            let w8_s2amjs6e = simd.mul_exp_neg_pi_over_8(fwd, s2amjs6e);
+            let j_a2am1a6e = simd.mul_j(fwd, a2am1a6e);
+            let v8_s2apjs6e = simd.mul_exp_pi_over_8(fwd, s2apjs6e);
+
+            let a08p1a4c_p1_a2ap1a6e = simd.add(a08p1a4c, a2ap1a6e);
+            let s08mjs4c_pw_s2amjs6e = simd.add(s08mjs4c, w8_s2amjs6e);
+            let a08m1a4c_mj_a2am1a6e = simd.sub(a08m1a4c, j_a2am1a6e);
+            let s08pjs4c_mv_s2apjs6e = simd.sub(s08pjs4c, v8_s2apjs6e);
+            let a08p1a4c_m1_a2ap1a6e = simd.sub(a08p1a4c, a2ap1a6e);
+            let s08mjs4c_mw_s2amjs6e = simd.sub(s08mjs4c, w8_s2amjs6e);
+            let a08m1a4c_pj_a2am1a6e = simd.add(a08m1a4c, j_a2am1a6e);
+            let s08pjs4c_pv_s2apjs6e = simd.add(s08pjs4c, v8_s2apjs6e);
+
+            let w8_s3bmjs7f = simd.mul_exp_neg_pi_over_8(fwd, s3bmjs7f);
+            let j_a3bm1a7f = simd.mul_j(fwd, a3bm1a7f);
+            let v8_s3bpjs7f = simd.mul_exp_pi_over_8(fwd, s3bpjs7f);
+
+            let a19p1a5d_p1_a3bp1a7f = simd.add(a19p1a5d, a3bp1a7f);
+            let s19mjs5d_pw_s3bmjs7f = simd.add(s19mjs5d, w8_s3bmjs7f);
+            let a19m1a5d_mj_a3bm1a7f = simd.sub(a19m1a5d, j_a3bm1a7f);
+            let s19pjs5d_mv_s3bpjs7f = simd.sub(s19pjs5d, v8_s3bpjs7f);
+            let a19p1a5d_m1_a3bp1a7f = simd.sub(a19p1a5d, a3bp1a7f);
+            let s19mjs5d_mw_s3bmjs7f = simd.sub(s19mjs5d, w8_s3bmjs7f);
+            let a19m1a5d_pj_a3bm1a7f = simd.add(a19m1a5d, j_a3bm1a7f);
+            let s19pjs5d_pv_s3bpjs7f = simd.add(s19pjs5d, v8_s3bpjs7f);
+
+            *x0 = simd.add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+            *x8 = simd.sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f);
+
+            let h1_s19mjs5d_pw_s3bmjs7f = simd.mul_exp_pi_over_16(fwd, s19mjs5d_pw_s3bmjs7f);
+            *x1 = simd.add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
+            *x9 = simd.sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f);
+
+            let w8_a19m1a5d_mj_a3bm1a7f = simd.mul_exp_neg_pi_over_8(fwd, a19m1a5d_mj_a3bm1a7f);
+            *x2 = simd.add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
+            *xa = simd.sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f);
+
+            let h3_s19pjs5d_mv_s3bpjs7f = simd.mul_exp_17pi_over_16(fwd, s19pjs5d_mv_s3bpjs7f);
+            *x3 = simd.add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
+            *xb = simd.sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f);
+
+            let j_a19p1a5d_m1_a3bp1a7f = simd.mul_j(fwd, a19p1a5d_m1_a3bp1a7f);
+            *x4 = simd.sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
+            *xc = simd.add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f);
+
+            let hd_s19mjs5d_mw_s3bmjs7f = simd.mul_exp_neg_17pi_over_16(fwd, s19mjs5d_mw_s3bmjs7f);
+            *x5 = simd.sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
+            *xd = simd.add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f);
+
+            let v8_a19m1a5d_pj_a3bm1a7f = simd.mul_exp_pi_over_8(fwd, a19m1a5d_pj_a3bm1a7f);
+            *x6 = simd.sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
+            *xe = simd.add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f);
+
+            let hf_s19pjs5d_pv_s3bpjs7f = simd.mul_exp_neg_pi_over_16(fwd, s19pjs5d_pv_s3bpjs7f);
+            *x7 = simd.sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
+            *xf = simd.add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f);
         }
     }
 }
 
 #[inline(always)]
-#[allow(dead_code)]
-unsafe fn core_x2<I: FftSimd64X2>(
+fn stockham_core<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
     fwd: bool,
-    n: usize,
     s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
+    x: &mut [c64xN],
+    y: &[c64xN],
+    w_init: &[c64xN],
+    w: &[c64],
 ) {
-    debug_assert_eq!(s, 1);
-
-    let big_n = n;
-    let big_n0 = 0;
-    let big_n1 = big_n / 16;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-    let big_n4 = big_n1 * 4;
-    let big_n5 = big_n1 * 5;
-    let big_n6 = big_n1 * 6;
-    let big_n7 = big_n1 * 7;
-    let big_n8 = big_n1 * 8;
-    let big_n9 = big_n1 * 9;
-    let big_na = big_n1 * 10;
-    let big_nb = big_n1 * 11;
-    let big_nc = big_n1 * 12;
-    let big_nd = big_n1 * 13;
-    let big_ne = big_n1 * 14;
-    let big_nf = big_n1 * 15;
-
-    let mut p = 0;
-    while p < big_n1 {
-        let x_p = x.add(p);
-        let y_16p = y.add(16 * p);
-
-        let w1p = I::load(twid(16, big_n, 1, w, p));
-        let w2p = I::load(twid(16, big_n, 2, w, p));
-        let w3p = I::load(twid(16, big_n, 3, w, p));
-        let w4p = I::load(twid(16, big_n, 4, w, p));
-        let w5p = I::load(twid(16, big_n, 5, w, p));
-        let w6p = I::load(twid(16, big_n, 6, w, p));
-        let w7p = I::load(twid(16, big_n, 7, w, p));
-        let w8p = I::load(twid(16, big_n, 8, w, p));
-        let w9p = I::load(twid(16, big_n, 9, w, p));
-        let wap = I::load(twid(16, big_n, 10, w, p));
-        let wbp = I::load(twid(16, big_n, 11, w, p));
-        let wcp = I::load(twid(16, big_n, 12, w, p));
-        let wdp = I::load(twid(16, big_n, 13, w, p));
-        let wep = I::load(twid(16, big_n, 14, w, p));
-        let wfp = I::load(twid(16, big_n, 15, w, p));
-
-        let ab_0 = I::load(y_16p.add(0x00));
-        let cd_0 = I::load(y_16p.add(0x02));
-        let ef_0 = I::load(y_16p.add(0x04));
-        let gh_0 = I::load(y_16p.add(0x06));
-        let ij_0 = I::load(y_16p.add(0x08));
-        let kl_0 = I::load(y_16p.add(0x0a));
-        let mn_0 = I::load(y_16p.add(0x0c));
-        let op_0 = I::load(y_16p.add(0x0e));
-        let ab_1 = I::load(y_16p.add(0x10));
-        let cd_1 = I::load(y_16p.add(0x12));
-        let ef_1 = I::load(y_16p.add(0x14));
-        let gh_1 = I::load(y_16p.add(0x16));
-        let ij_1 = I::load(y_16p.add(0x18));
-        let kl_1 = I::load(y_16p.add(0x1a));
-        let mn_1 = I::load(y_16p.add(0x1c));
-        let op_1 = I::load(y_16p.add(0x1e));
-
-        let y0 = I::catlo(ab_0, ab_1);
-        let y1 = I::mul(w1p, I::cathi(ab_0, ab_1));
-        let y2 = I::mul(w2p, I::catlo(cd_0, cd_1));
-        let y3 = I::mul(w3p, I::cathi(cd_0, cd_1));
-        let y4 = I::mul(w4p, I::catlo(ef_0, ef_1));
-        let y5 = I::mul(w5p, I::cathi(ef_0, ef_1));
-        let y6 = I::mul(w6p, I::catlo(gh_0, gh_1));
-        let y7 = I::mul(w7p, I::cathi(gh_0, gh_1));
-
-        let y8 = I::mul(w8p, I::catlo(ij_0, ij_1));
-        let y9 = I::mul(w9p, I::cathi(ij_0, ij_1));
-        let ya = I::mul(wap, I::catlo(kl_0, kl_1));
-        let yb = I::mul(wbp, I::cathi(kl_0, kl_1));
-        let yc = I::mul(wcp, I::catlo(mn_0, mn_1));
-        let yd = I::mul(wdp, I::cathi(mn_0, mn_1));
-        let ye = I::mul(wep, I::catlo(op_0, op_1));
-        let yf = I::mul(wfp, I::cathi(op_0, op_1));
-
-        let a08 = I::add(y0, y8);
-        let s08 = I::sub(y0, y8);
-        let a4c = I::add(y4, yc);
-        let s4c = I::sub(y4, yc);
-        let a2a = I::add(y2, ya);
-        let s2a = I::sub(y2, ya);
-        let a6e = I::add(y6, ye);
-        let s6e = I::sub(y6, ye);
-        let a19 = I::add(y1, y9);
-        let s19 = I::sub(y1, y9);
-        let a5d = I::add(y5, yd);
-        let s5d = I::sub(y5, yd);
-        let a3b = I::add(y3, yb);
-        let s3b = I::sub(y3, yb);
-        let a7f = I::add(y7, yf);
-        let s7f = I::sub(y7, yf);
-
-        let js4c = I::xpj(fwd, s4c);
-        let js6e = I::xpj(fwd, s6e);
-        let js5d = I::xpj(fwd, s5d);
-        let js7f = I::xpj(fwd, s7f);
-
-        let a08p1a4c = I::add(a08, a4c);
-        let s08mjs4c = I::sub(s08, js4c);
-        let a08m1a4c = I::sub(a08, a4c);
-        let s08pjs4c = I::add(s08, js4c);
-        let a2ap1a6e = I::add(a2a, a6e);
-        let s2amjs6e = I::sub(s2a, js6e);
-        let a2am1a6e = I::sub(a2a, a6e);
-        let s2apjs6e = I::add(s2a, js6e);
-        let a19p1a5d = I::add(a19, a5d);
-        let s19mjs5d = I::sub(s19, js5d);
-        let a19m1a5d = I::sub(a19, a5d);
-        let s19pjs5d = I::add(s19, js5d);
-        let a3bp1a7f = I::add(a3b, a7f);
-        let s3bmjs7f = I::sub(s3b, js7f);
-        let a3bm1a7f = I::sub(a3b, a7f);
-        let s3bpjs7f = I::add(s3b, js7f);
-
-        let w8_s2amjs6e = I::xw8(fwd, s2amjs6e);
-        let j_a2am1a6e = I::xpj(fwd, a2am1a6e);
-        let v8_s2apjs6e = I::xv8(fwd, s2apjs6e);
-
-        let a08p1a4c_p1_a2ap1a6e = I::add(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_pw_s2amjs6e = I::add(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_mj_a2am1a6e = I::sub(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_mv_s2apjs6e = I::sub(s08pjs4c, v8_s2apjs6e);
-        let a08p1a4c_m1_a2ap1a6e = I::sub(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_mw_s2amjs6e = I::sub(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_pj_a2am1a6e = I::add(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_pv_s2apjs6e = I::add(s08pjs4c, v8_s2apjs6e);
-
-        let w8_s3bmjs7f = I::xw8(fwd, s3bmjs7f);
-        let j_a3bm1a7f = I::xpj(fwd, a3bm1a7f);
-        let v8_s3bpjs7f = I::xv8(fwd, s3bpjs7f);
-
-        let a19p1a5d_p1_a3bp1a7f = I::add(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_pw_s3bmjs7f = I::add(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_mj_a3bm1a7f = I::sub(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_mv_s3bpjs7f = I::sub(s19pjs5d, v8_s3bpjs7f);
-        let a19p1a5d_m1_a3bp1a7f = I::sub(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_mw_s3bmjs7f = I::sub(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_pj_a3bm1a7f = I::add(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_pv_s3bpjs7f = I::add(s19pjs5d, v8_s3bpjs7f);
-
-        I::store(
-            x_p.add(big_n0),
-            I::add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-        I::store(
-            x_p.add(big_n8),
-            I::sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-
-        let h1_s19mjs5d_pw_s3bmjs7f = I::xh1(fwd, s19mjs5d_pw_s3bmjs7f);
-        I::store(
-            x_p.add(big_n1),
-            I::add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-        I::store(
-            x_p.add(big_n9),
-            I::sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-
-        let w8_a19m1a5d_mj_a3bm1a7f = I::xw8(fwd, a19m1a5d_mj_a3bm1a7f);
-        I::store(
-            x_p.add(big_n2),
-            I::add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-        I::store(
-            x_p.add(big_na),
-            I::sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-
-        let h3_s19pjs5d_mv_s3bpjs7f = I::xh3(fwd, s19pjs5d_mv_s3bpjs7f);
-        I::store(
-            x_p.add(big_n3),
-            I::add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-        I::store(
-            x_p.add(big_nb),
-            I::sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-
-        let j_a19p1a5d_m1_a3bp1a7f = I::xpj(fwd, a19p1a5d_m1_a3bp1a7f);
-        I::store(
-            x_p.add(big_n4),
-            I::sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-        I::store(
-            x_p.add(big_nc),
-            I::add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-
-        let hd_s19mjs5d_mw_s3bmjs7f = I::xhd(fwd, s19mjs5d_mw_s3bmjs7f);
-        I::store(
-            x_p.add(big_n5),
-            I::sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-        I::store(
-            x_p.add(big_nd),
-            I::add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-
-        let v8_a19m1a5d_pj_a3bm1a7f = I::xv8(fwd, a19m1a5d_pj_a3bm1a7f);
-        I::store(
-            x_p.add(big_n6),
-            I::sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-        I::store(
-            x_p.add(big_ne),
-            I::add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-
-        let hf_s19pjs5d_pv_s3bpjs7f = I::xhf(fwd, s19pjs5d_pv_s3bpjs7f);
-        I::store(
-            x_p.add(big_n7),
-            I::sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-        I::store(
-            x_p.add(big_nf),
-            I::add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-
-        p += 2;
-    }
+    // we create a fn pointer that will be force-inlined in release builds
+    // but not in debug builds. this helps keep compile times low, since dead code
+    // elimination handles this well in release builds. and the function pointer indirection
+    // prevents inlining in debug builds.
+    let stockham = if s == 1 && simd.lane_count() == 2 {
+        stockham_core_1x2
+    } else if s == 1 && simd.lane_count() == 4 {
+        stockham_core_1x4
+    } else {
+        stockham_core_generic
+    };
+    stockham(simd, fwd, s, x, y, w_init, w);
 }
 
 #[inline(always)]
-#[allow(dead_code)]
-unsafe fn core_x4<I2: FftSimd64X2, I4: FftSimd64X4>(
+fn last_butterfly<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
     fwd: bool,
-    n: usize,
-    s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    w: *const c64,
+    x0: c64xN,
+    x1: c64xN,
+    x2: c64xN,
+    x3: c64xN,
+    x4: c64xN,
+    x5: c64xN,
+    x6: c64xN,
+    x7: c64xN,
+    x8: c64xN,
+    x9: c64xN,
+    xa: c64xN,
+    xb: c64xN,
+    xc: c64xN,
+    xd: c64xN,
+    xe: c64xN,
+    xf: c64xN,
+) -> (
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
+    c64xN,
 ) {
-    debug_assert_eq!(s, 1);
-    if n == 32 {
-        return core_x2::<I2>(fwd, n, s, x, y, w);
-    }
+    let a08 = simd.add(x0, x8);
+    let s08 = simd.sub(x0, x8);
+    let a4c = simd.add(x4, xc);
+    let s4c = simd.sub(x4, xc);
+    let a2a = simd.add(x2, xa);
+    let s2a = simd.sub(x2, xa);
+    let a6e = simd.add(x6, xe);
+    let s6e = simd.sub(x6, xe);
+    let a19 = simd.add(x1, x9);
+    let s19 = simd.sub(x1, x9);
+    let a5d = simd.add(x5, xd);
+    let s5d = simd.sub(x5, xd);
+    let a3b = simd.add(x3, xb);
+    let s3b = simd.sub(x3, xb);
+    let a7f = simd.add(x7, xf);
+    let s7f = simd.sub(x7, xf);
 
-    let big_n = n;
-    let big_n0 = 0;
-    let big_n1 = big_n / 16;
-    let big_n2 = big_n1 * 2;
-    let big_n3 = big_n1 * 3;
-    let big_n4 = big_n1 * 4;
-    let big_n5 = big_n1 * 5;
-    let big_n6 = big_n1 * 6;
-    let big_n7 = big_n1 * 7;
-    let big_n8 = big_n1 * 8;
-    let big_n9 = big_n1 * 9;
-    let big_na = big_n1 * 10;
-    let big_nb = big_n1 * 11;
-    let big_nc = big_n1 * 12;
-    let big_nd = big_n1 * 13;
-    let big_ne = big_n1 * 14;
-    let big_nf = big_n1 * 15;
+    let js4c = simd.mul_j(fwd, s4c);
+    let js6e = simd.mul_j(fwd, s6e);
+    let js5d = simd.mul_j(fwd, s5d);
+    let js7f = simd.mul_j(fwd, s7f);
 
-    debug_assert_eq!(big_n1 % 4, 0);
-    let mut p = 0;
-    while p < big_n1 {
-        let x_p = x.add(p);
-        let y_16p = y.add(16 * p);
+    let a08p1a4c = simd.add(a08, a4c);
+    let s08mjs4c = simd.sub(s08, js4c);
+    let a08m1a4c = simd.sub(a08, a4c);
+    let s08pjs4c = simd.add(s08, js4c);
+    let a2ap1a6e = simd.add(a2a, a6e);
+    let s2amjs6e = simd.sub(s2a, js6e);
+    let a2am1a6e = simd.sub(a2a, a6e);
+    let s2apjs6e = simd.add(s2a, js6e);
+    let a19p1a5d = simd.add(a19, a5d);
+    let s19mjs5d = simd.sub(s19, js5d);
+    let a19m1a5d = simd.sub(a19, a5d);
+    let s19pjs5d = simd.add(s19, js5d);
+    let a3bp1a7f = simd.add(a3b, a7f);
+    let s3bmjs7f = simd.sub(s3b, js7f);
+    let a3bm1a7f = simd.sub(a3b, a7f);
+    let s3bpjs7f = simd.add(s3b, js7f);
 
-        let w1p = I4::load(twid(16, big_n, 1, w, p));
-        let w2p = I4::load(twid(16, big_n, 2, w, p));
-        let w3p = I4::load(twid(16, big_n, 3, w, p));
-        let w4p = I4::load(twid(16, big_n, 4, w, p));
-        let w5p = I4::load(twid(16, big_n, 5, w, p));
-        let w6p = I4::load(twid(16, big_n, 6, w, p));
-        let w7p = I4::load(twid(16, big_n, 7, w, p));
-        let w8p = I4::load(twid(16, big_n, 8, w, p));
-        let w9p = I4::load(twid(16, big_n, 9, w, p));
-        let wap = I4::load(twid(16, big_n, 10, w, p));
-        let wbp = I4::load(twid(16, big_n, 11, w, p));
-        let wcp = I4::load(twid(16, big_n, 12, w, p));
-        let wdp = I4::load(twid(16, big_n, 13, w, p));
-        let wep = I4::load(twid(16, big_n, 14, w, p));
-        let wfp = I4::load(twid(16, big_n, 15, w, p));
+    let w8_s2amjs6e = simd.mul_exp_neg_pi_over_8(fwd, s2amjs6e);
+    let j_a2am1a6e = simd.mul_j(fwd, a2am1a6e);
+    let v8_s2apjs6e = simd.mul_exp_pi_over_8(fwd, s2apjs6e);
 
-        let abcd0 = I4::load(y_16p.add(0x00));
-        let efgh0 = I4::load(y_16p.add(0x04));
-        let ijkl0 = I4::load(y_16p.add(0x08));
-        let mnop0 = I4::load(y_16p.add(0x0c));
+    let a08p1a4c_p1_a2ap1a6e = simd.add(a08p1a4c, a2ap1a6e);
+    let s08mjs4c_pw_s2amjs6e = simd.add(s08mjs4c, w8_s2amjs6e);
+    let a08m1a4c_mj_a2am1a6e = simd.sub(a08m1a4c, j_a2am1a6e);
+    let s08pjs4c_mv_s2apjs6e = simd.sub(s08pjs4c, v8_s2apjs6e);
+    let a08p1a4c_m1_a2ap1a6e = simd.sub(a08p1a4c, a2ap1a6e);
+    let s08mjs4c_mw_s2amjs6e = simd.sub(s08mjs4c, w8_s2amjs6e);
+    let a08m1a4c_pj_a2am1a6e = simd.add(a08m1a4c, j_a2am1a6e);
+    let s08pjs4c_pv_s2apjs6e = simd.add(s08pjs4c, v8_s2apjs6e);
 
-        let abcd1 = I4::load(y_16p.add(0x10));
-        let efgh1 = I4::load(y_16p.add(0x14));
-        let ijkl1 = I4::load(y_16p.add(0x18));
-        let mnop1 = I4::load(y_16p.add(0x1c));
+    let w8_s3bmjs7f = simd.mul_exp_neg_pi_over_8(fwd, s3bmjs7f);
+    let j_a3bm1a7f = simd.mul_j(fwd, a3bm1a7f);
+    let v8_s3bpjs7f = simd.mul_exp_pi_over_8(fwd, s3bpjs7f);
 
-        let abcd2 = I4::load(y_16p.add(0x20));
-        let efgh2 = I4::load(y_16p.add(0x24));
-        let ijkl2 = I4::load(y_16p.add(0x28));
-        let mnop2 = I4::load(y_16p.add(0x2c));
+    let a19p1a5d_p1_a3bp1a7f = simd.add(a19p1a5d, a3bp1a7f);
+    let s19mjs5d_pw_s3bmjs7f = simd.add(s19mjs5d, w8_s3bmjs7f);
+    let a19m1a5d_mj_a3bm1a7f = simd.sub(a19m1a5d, j_a3bm1a7f);
+    let s19pjs5d_mv_s3bpjs7f = simd.sub(s19pjs5d, v8_s3bpjs7f);
+    let a19p1a5d_m1_a3bp1a7f = simd.sub(a19p1a5d, a3bp1a7f);
+    let s19mjs5d_mw_s3bmjs7f = simd.sub(s19mjs5d, w8_s3bmjs7f);
+    let a19m1a5d_pj_a3bm1a7f = simd.add(a19m1a5d, j_a3bm1a7f);
+    let s19pjs5d_pv_s3bpjs7f = simd.add(s19pjs5d, v8_s3bpjs7f);
 
-        let abcd3 = I4::load(y_16p.add(0x30));
-        let efgh3 = I4::load(y_16p.add(0x34));
-        let ijkl3 = I4::load(y_16p.add(0x38));
-        let mnop3 = I4::load(y_16p.add(0x3c));
+    let h1_s19mjs5d_pw_s3bmjs7f = simd.mul_exp_pi_over_16(fwd, s19mjs5d_pw_s3bmjs7f);
+    let w8_a19m1a5d_mj_a3bm1a7f = simd.mul_exp_neg_pi_over_8(fwd, a19m1a5d_mj_a3bm1a7f);
+    let h3_s19pjs5d_mv_s3bpjs7f = simd.mul_exp_17pi_over_16(fwd, s19pjs5d_mv_s3bpjs7f);
+    let j_a19p1a5d_m1_a3bp1a7f = simd.mul_j(fwd, a19p1a5d_m1_a3bp1a7f);
+    let hd_s19mjs5d_mw_s3bmjs7f = simd.mul_exp_neg_17pi_over_16(fwd, s19mjs5d_mw_s3bmjs7f);
+    let v8_a19m1a5d_pj_a3bm1a7f = simd.mul_exp_pi_over_8(fwd, a19m1a5d_pj_a3bm1a7f);
+    let hf_s19pjs5d_pv_s3bpjs7f = simd.mul_exp_neg_pi_over_16(fwd, s19pjs5d_pv_s3bpjs7f);
 
-        let (a_, b_, c_, d_) = I4::transpose(abcd0, abcd1, abcd2, abcd3);
-        let (e_, f_, g_, h_) = I4::transpose(efgh0, efgh1, efgh2, efgh3);
-        let (i_, j_, k_, l_) = I4::transpose(ijkl0, ijkl1, ijkl2, ijkl3);
-        let (m_, n_, o_, p_) = I4::transpose(mnop0, mnop1, mnop2, mnop3);
-
-        let y0 = a_;
-        let y1 = I4::mul(w1p, b_);
-        let y2 = I4::mul(w2p, c_);
-        let y3 = I4::mul(w3p, d_);
-        let y4 = I4::mul(w4p, e_);
-        let y5 = I4::mul(w5p, f_);
-        let y6 = I4::mul(w6p, g_);
-        let y7 = I4::mul(w7p, h_);
-
-        let y8 = I4::mul(w8p, i_);
-        let y9 = I4::mul(w9p, j_);
-        let ya = I4::mul(wap, k_);
-        let yb = I4::mul(wbp, l_);
-        let yc = I4::mul(wcp, m_);
-        let yd = I4::mul(wdp, n_);
-        let ye = I4::mul(wep, o_);
-        let yf = I4::mul(wfp, p_);
-
-        let a08 = I4::add(y0, y8);
-        let s08 = I4::sub(y0, y8);
-        let a4c = I4::add(y4, yc);
-        let s4c = I4::sub(y4, yc);
-        let a2a = I4::add(y2, ya);
-        let s2a = I4::sub(y2, ya);
-        let a6e = I4::add(y6, ye);
-        let s6e = I4::sub(y6, ye);
-        let a19 = I4::add(y1, y9);
-        let s19 = I4::sub(y1, y9);
-        let a5d = I4::add(y5, yd);
-        let s5d = I4::sub(y5, yd);
-        let a3b = I4::add(y3, yb);
-        let s3b = I4::sub(y3, yb);
-        let a7f = I4::add(y7, yf);
-        let s7f = I4::sub(y7, yf);
-
-        let js4c = I4::xpj(fwd, s4c);
-        let js6e = I4::xpj(fwd, s6e);
-        let js5d = I4::xpj(fwd, s5d);
-        let js7f = I4::xpj(fwd, s7f);
-
-        let a08p1a4c = I4::add(a08, a4c);
-        let s08mjs4c = I4::sub(s08, js4c);
-        let a08m1a4c = I4::sub(a08, a4c);
-        let s08pjs4c = I4::add(s08, js4c);
-        let a2ap1a6e = I4::add(a2a, a6e);
-        let s2amjs6e = I4::sub(s2a, js6e);
-        let a2am1a6e = I4::sub(a2a, a6e);
-        let s2apjs6e = I4::add(s2a, js6e);
-        let a19p1a5d = I4::add(a19, a5d);
-        let s19mjs5d = I4::sub(s19, js5d);
-        let a19m1a5d = I4::sub(a19, a5d);
-        let s19pjs5d = I4::add(s19, js5d);
-        let a3bp1a7f = I4::add(a3b, a7f);
-        let s3bmjs7f = I4::sub(s3b, js7f);
-        let a3bm1a7f = I4::sub(a3b, a7f);
-        let s3bpjs7f = I4::add(s3b, js7f);
-
-        let w8_s2amjs6e = I4::xw8(fwd, s2amjs6e);
-        let j_a2am1a6e = I4::xpj(fwd, a2am1a6e);
-        let v8_s2apjs6e = I4::xv8(fwd, s2apjs6e);
-
-        let a08p1a4c_p1_a2ap1a6e = I4::add(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_pw_s2amjs6e = I4::add(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_mj_a2am1a6e = I4::sub(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_mv_s2apjs6e = I4::sub(s08pjs4c, v8_s2apjs6e);
-        let a08p1a4c_m1_a2ap1a6e = I4::sub(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_mw_s2amjs6e = I4::sub(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_pj_a2am1a6e = I4::add(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_pv_s2apjs6e = I4::add(s08pjs4c, v8_s2apjs6e);
-
-        let w8_s3bmjs7f = I4::xw8(fwd, s3bmjs7f);
-        let j_a3bm1a7f = I4::xpj(fwd, a3bm1a7f);
-        let v8_s3bpjs7f = I4::xv8(fwd, s3bpjs7f);
-
-        let a19p1a5d_p1_a3bp1a7f = I4::add(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_pw_s3bmjs7f = I4::add(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_mj_a3bm1a7f = I4::sub(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_mv_s3bpjs7f = I4::sub(s19pjs5d, v8_s3bpjs7f);
-        let a19p1a5d_m1_a3bp1a7f = I4::sub(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_mw_s3bmjs7f = I4::sub(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_pj_a3bm1a7f = I4::add(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_pv_s3bpjs7f = I4::add(s19pjs5d, v8_s3bpjs7f);
-
-        I4::store(
-            x_p.add(big_n0),
-            I4::add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-        I4::store(
-            x_p.add(big_n8),
-            I4::sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-
-        let h1_s19mjs5d_pw_s3bmjs7f = I4::xh1(fwd, s19mjs5d_pw_s3bmjs7f);
-        I4::store(
-            x_p.add(big_n1),
-            I4::add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-        I4::store(
-            x_p.add(big_n9),
-            I4::sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-
-        let w8_a19m1a5d_mj_a3bm1a7f = I4::xw8(fwd, a19m1a5d_mj_a3bm1a7f);
-        I4::store(
-            x_p.add(big_n2),
-            I4::add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-        I4::store(
-            x_p.add(big_na),
-            I4::sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-
-        let h3_s19pjs5d_mv_s3bpjs7f = I4::xh3(fwd, s19pjs5d_mv_s3bpjs7f);
-        I4::store(
-            x_p.add(big_n3),
-            I4::add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-        I4::store(
-            x_p.add(big_nb),
-            I4::sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-
-        let j_a19p1a5d_m1_a3bp1a7f = I4::xpj(fwd, a19p1a5d_m1_a3bp1a7f);
-        I4::store(
-            x_p.add(big_n4),
-            I4::sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-        I4::store(
-            x_p.add(big_nc),
-            I4::add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-
-        let hd_s19mjs5d_mw_s3bmjs7f = I4::xhd(fwd, s19mjs5d_mw_s3bmjs7f);
-        I4::store(
-            x_p.add(big_n5),
-            I4::sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-        I4::store(
-            x_p.add(big_nd),
-            I4::add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-
-        let v8_a19m1a5d_pj_a3bm1a7f = I4::xv8(fwd, a19m1a5d_pj_a3bm1a7f);
-        I4::store(
-            x_p.add(big_n6),
-            I4::sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-        I4::store(
-            x_p.add(big_ne),
-            I4::add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-
-        let hf_s19pjs5d_pv_s3bpjs7f = I4::xhf(fwd, s19pjs5d_pv_s3bpjs7f);
-        I4::store(
-            x_p.add(big_n7),
-            I4::sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-        I4::store(
-            x_p.add(big_nf),
-            I4::add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-
-        p += 4;
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn end16<I: FftSimd64>(
-    fwd: bool,
-    n: usize,
-    s: usize,
-    x: *mut c64,
-    y: *mut c64,
-    eo: bool,
-) {
-    debug_assert_eq!(n, 16);
-    debug_assert_eq!(s % I::COMPLEX_PER_REG, 0);
-
-    let z = if eo { y } else { x };
-
-    let mut q = 0;
-    while q < s {
-        let xq = x.add(q);
-        let zq = z.add(q);
-
-        let z0 = I::load(zq.add(0x0));
-        let z1 = I::load(zq.add(s));
-        let z2 = I::load(zq.add(s * 0x2));
-        let z3 = I::load(zq.add(s * 0x3));
-        let z4 = I::load(zq.add(s * 0x4));
-        let z5 = I::load(zq.add(s * 0x5));
-        let z6 = I::load(zq.add(s * 0x6));
-        let z7 = I::load(zq.add(s * 0x7));
-        let z8 = I::load(zq.add(s * 0x8));
-        let z9 = I::load(zq.add(s * 0x9));
-        let za = I::load(zq.add(s * 0xa));
-        let zb = I::load(zq.add(s * 0xb));
-        let zc = I::load(zq.add(s * 0xc));
-        let zd = I::load(zq.add(s * 0xd));
-        let ze = I::load(zq.add(s * 0xe));
-        let zf = I::load(zq.add(s * 0xf));
-
-        let a08 = I::add(z0, z8);
-        let s08 = I::sub(z0, z8);
-        let a4c = I::add(z4, zc);
-        let s4c = I::sub(z4, zc);
-        let a2a = I::add(z2, za);
-        let s2a = I::sub(z2, za);
-        let a6e = I::add(z6, ze);
-        let s6e = I::sub(z6, ze);
-        let a19 = I::add(z1, z9);
-        let s19 = I::sub(z1, z9);
-        let a5d = I::add(z5, zd);
-        let s5d = I::sub(z5, zd);
-        let a3b = I::add(z3, zb);
-        let s3b = I::sub(z3, zb);
-        let a7f = I::add(z7, zf);
-        let s7f = I::sub(z7, zf);
-
-        let js4c = I::xpj(fwd, s4c);
-        let js6e = I::xpj(fwd, s6e);
-        let js5d = I::xpj(fwd, s5d);
-        let js7f = I::xpj(fwd, s7f);
-
-        let a08p1a4c = I::add(a08, a4c);
-        let s08mjs4c = I::sub(s08, js4c);
-        let a08m1a4c = I::sub(a08, a4c);
-        let s08pjs4c = I::add(s08, js4c);
-        let a2ap1a6e = I::add(a2a, a6e);
-        let s2amjs6e = I::sub(s2a, js6e);
-        let a2am1a6e = I::sub(a2a, a6e);
-        let s2apjs6e = I::add(s2a, js6e);
-        let a19p1a5d = I::add(a19, a5d);
-        let s19mjs5d = I::sub(s19, js5d);
-        let a19m1a5d = I::sub(a19, a5d);
-        let s19pjs5d = I::add(s19, js5d);
-        let a3bp1a7f = I::add(a3b, a7f);
-        let s3bmjs7f = I::sub(s3b, js7f);
-        let a3bm1a7f = I::sub(a3b, a7f);
-        let s3bpjs7f = I::add(s3b, js7f);
-
-        let w8_s2amjs6e = I::xw8(fwd, s2amjs6e);
-        let j_a2am1a6e = I::xpj(fwd, a2am1a6e);
-        let v8_s2apjs6e = I::xv8(fwd, s2apjs6e);
-
-        let a08p1a4c_p1_a2ap1a6e = I::add(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_pw_s2amjs6e = I::add(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_mj_a2am1a6e = I::sub(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_mv_s2apjs6e = I::sub(s08pjs4c, v8_s2apjs6e);
-        let a08p1a4c_m1_a2ap1a6e = I::sub(a08p1a4c, a2ap1a6e);
-        let s08mjs4c_mw_s2amjs6e = I::sub(s08mjs4c, w8_s2amjs6e);
-        let a08m1a4c_pj_a2am1a6e = I::add(a08m1a4c, j_a2am1a6e);
-        let s08pjs4c_pv_s2apjs6e = I::add(s08pjs4c, v8_s2apjs6e);
-
-        let w8_s3bmjs7f = I::xw8(fwd, s3bmjs7f);
-        let j_a3bm1a7f = I::xpj(fwd, a3bm1a7f);
-        let v8_s3bpjs7f = I::xv8(fwd, s3bpjs7f);
-
-        let a19p1a5d_p1_a3bp1a7f = I::add(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_pw_s3bmjs7f = I::add(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_mj_a3bm1a7f = I::sub(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_mv_s3bpjs7f = I::sub(s19pjs5d, v8_s3bpjs7f);
-        let a19p1a5d_m1_a3bp1a7f = I::sub(a19p1a5d, a3bp1a7f);
-        let s19mjs5d_mw_s3bmjs7f = I::sub(s19mjs5d, w8_s3bmjs7f);
-        let a19m1a5d_pj_a3bm1a7f = I::add(a19m1a5d, j_a3bm1a7f);
-        let s19pjs5d_pv_s3bpjs7f = I::add(s19pjs5d, v8_s3bpjs7f);
-
-        let h1_s19mjs5d_pw_s3bmjs7f = I::xh1(fwd, s19mjs5d_pw_s3bmjs7f);
-        let w8_a19m1a5d_mj_a3bm1a7f = I::xw8(fwd, a19m1a5d_mj_a3bm1a7f);
-        let h3_s19pjs5d_mv_s3bpjs7f = I::xh3(fwd, s19pjs5d_mv_s3bpjs7f);
-        let j_a19p1a5d_m1_a3bp1a7f = I::xpj(fwd, a19p1a5d_m1_a3bp1a7f);
-        let hd_s19mjs5d_mw_s3bmjs7f = I::xhd(fwd, s19mjs5d_mw_s3bmjs7f);
-        let v8_a19m1a5d_pj_a3bm1a7f = I::xv8(fwd, a19m1a5d_pj_a3bm1a7f);
-        let hf_s19pjs5d_pv_s3bpjs7f = I::xhf(fwd, s19pjs5d_pv_s3bpjs7f);
-
-        I::store(
-            xq.add(0x0),
-            I::add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-        I::store(
-            xq.add(s),
-            I::add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-        I::store(
-            xq.add(s * 0x2),
-            I::add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-        I::store(
-            xq.add(s * 0x3),
-            I::add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-        I::store(
-            xq.add(s * 0x4),
-            I::sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-        I::store(
-            xq.add(s * 0x5),
-            I::sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-        I::store(
-            xq.add(s * 0x6),
-            I::sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-        I::store(
-            xq.add(s * 0x7),
-            I::sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-
-        I::store(
-            xq.add(s * 0x8),
-            I::sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
-        );
-        I::store(
-            xq.add(s * 0x9),
-            I::sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
-        );
-        I::store(
-            xq.add(s * 0xa),
-            I::sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
-        );
-        I::store(
-            xq.add(s * 0xb),
-            I::sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
-        );
-        I::store(
-            xq.add(s * 0xc),
-            I::add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
-        );
-        I::store(
-            xq.add(s * 0xd),
-            I::add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
-        );
-        I::store(
-            xq.add(s * 0xe),
-            I::add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
-        );
-        I::store(
-            xq.add(s * 0xf),
-            I::add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
-        );
-
-        q += I::COMPLEX_PER_REG;
-    }
-}
-
-macro_rules! dit16_impl {
     (
-        $(
-            $(#[$attr: meta])*
-            pub static $fft: ident = Fft {
-                core_1: $core1______: expr,
-                native: $xn: ty,
-                x1: $x1: ty,
-                $(target: $target: tt,)?
-            };
-        )*
-    ) => {
-        $(
-            #[allow(missing_copy_implementations)]
-            #[allow(non_camel_case_types)]
-            #[allow(dead_code)]
-            $(#[$attr])*
-            struct $fft {
-                __private: (),
-            }
-            #[allow(unused_variables)]
-            #[allow(dead_code)]
-            $(#[$attr])*
-            impl $fft {
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_00<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {}
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_01<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_2::<$x1>(FWD, 1 << 1, 1 << 0, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_02<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_4::<$x1>(FWD, 1 << 2, 1 << 0, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_03<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_8::<$x1>(FWD, 1 << 3, 1 << 0, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_04<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end16::<$x1>(FWD, 1 << 4, 1 << 0, x, y, false);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_05<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 4, y, x, true);
-                    $core1______(FWD, 1 << 5, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_06<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_4::<$xn>(FWD, 1 << 2, 1 << 4, y, x, true);
-                    $core1______(FWD, 1 << 6, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_07<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_8::<$xn>(FWD, 1 << 3, 1 << 4, y, x, true);
-                    $core1______(FWD, 1 << 7, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_08<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end16::<$xn>(FWD, 1 << 4, 1 << 4, y, x, true);
-                    $core1______(FWD, 1 << 8, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_09<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_2::<$xn>(FWD, 1 << 1, 1 << 8, x, y, false);
-                    core_::<$xn>(FWD, 1 << 5, 1 << 4, y, x, w);
-                    $core1______(FWD, 1 << 9, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_10<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_4::<$xn>(FWD, 1 << 02, 1 << 8, x, y, false);
-                    core_::<$xn>(FWD, 1 << 06, 1 << 4, y, x, w);
-                    $core1______(FWD, 1 << 10, 1 << 0, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_11<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_8::<$xn>(FWD, 1 << 03, 1 << 08, x, y, false);
-                    core_::<$xn>(FWD, 1 << 07, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 11, 1 << 00, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_12<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end16::<$xn>(FWD, 1 << 04, 1 << 08, x, y, false);
-                    core_::<$xn>(FWD, 1 << 08, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 12, 1 << 00, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_13<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_2::<$xn>(FWD, 1 << 01, 1 << 12, y, x, true);
-                    core_::<$xn>(FWD, 1 << 05, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 09, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 13, 1 << 00, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_14<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_4::<$xn>(FWD, 1 << 02, 1 << 12, y, x, true);
-                    core_::<$xn>(FWD, 1 << 06, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 10, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 14, 1 << 00, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_15<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end_8::<$xn>(FWD, 1 << 03, 1 << 12, y, x, true);
-                    core_::<$xn>(FWD, 1 << 07, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 11, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 15, 1 << 00, x, y, w);
-                }
-                $(#[target_feature(enable = $target)])?
-                unsafe fn fft_16<const FWD: bool>(x: *mut c64, y: *mut c64, w: *const c64) {
-                    end16::<$xn>(FWD, 1 << 04, 1 << 12, y, x, true);
-                    core_::<$xn>(FWD, 1 << 08, 1 << 08, x, y, w);
-                    core_::<$xn>(FWD, 1 << 12, 1 << 04, y, x, w);
-                    $core1______(FWD, 1 << 16, 1 << 00, x, y, w);
-                }
-            }
-            $(#[$attr])*
-            pub(crate) static $fft: crate::FftImpl = crate::FftImpl {
-                fwd: [
-                    <$fft>::fft_00::<true>,
-                    <$fft>::fft_01::<true>,
-                    <$fft>::fft_02::<true>,
-                    <$fft>::fft_03::<true>,
-                    <$fft>::fft_04::<true>,
-                    <$fft>::fft_05::<true>,
-                    <$fft>::fft_06::<true>,
-                    <$fft>::fft_07::<true>,
-                    <$fft>::fft_08::<true>,
-                    <$fft>::fft_09::<true>,
-                    <$fft>::fft_10::<true>,
-                    <$fft>::fft_11::<true>,
-                    <$fft>::fft_12::<true>,
-                    <$fft>::fft_13::<true>,
-                    <$fft>::fft_14::<true>,
-                    <$fft>::fft_15::<true>,
-                    <$fft>::fft_16::<true>,
-                ],
-                inv: [
-                    <$fft>::fft_00::<false>,
-                    <$fft>::fft_01::<false>,
-                    <$fft>::fft_02::<false>,
-                    <$fft>::fft_03::<false>,
-                    <$fft>::fft_04::<false>,
-                    <$fft>::fft_05::<false>,
-                    <$fft>::fft_06::<false>,
-                    <$fft>::fft_07::<false>,
-                    <$fft>::fft_08::<false>,
-                    <$fft>::fft_09::<false>,
-                    <$fft>::fft_10::<false>,
-                    <$fft>::fft_11::<false>,
-                    <$fft>::fft_12::<false>,
-                    <$fft>::fft_13::<false>,
-                    <$fft>::fft_14::<false>,
-                    <$fft>::fft_15::<false>,
-                    <$fft>::fft_16::<false>,
-                ],
-            };
-            )*
-    };
+        simd.add(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
+        simd.add(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
+        simd.add(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
+        simd.add(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
+        simd.sub(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
+        simd.sub(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
+        simd.sub(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
+        simd.sub(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
+        simd.sub(a08p1a4c_p1_a2ap1a6e, a19p1a5d_p1_a3bp1a7f),
+        simd.sub(s08mjs4c_pw_s2amjs6e, h1_s19mjs5d_pw_s3bmjs7f),
+        simd.sub(a08m1a4c_mj_a2am1a6e, w8_a19m1a5d_mj_a3bm1a7f),
+        simd.sub(s08pjs4c_mv_s2apjs6e, h3_s19pjs5d_mv_s3bpjs7f),
+        simd.add(a08p1a4c_m1_a2ap1a6e, j_a19p1a5d_m1_a3bp1a7f),
+        simd.add(s08mjs4c_mw_s2amjs6e, hd_s19mjs5d_mw_s3bmjs7f),
+        simd.add(a08m1a4c_pj_a2am1a6e, v8_a19m1a5d_pj_a3bm1a7f),
+        simd.add(s08pjs4c_pv_s2apjs6e, hf_s19pjs5d_pv_s3bpjs7f),
+    )
 }
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-use crate::x86::*;
+#[inline(always)]
+pub fn stockham_dit16_end<c64xN: Pod>(
+    simd: impl FftSimd<c64xN>,
+    fwd: bool,
+    read_from_x: bool,
+    s: usize,
+    x: &mut [c64xN],
+    y: &mut [c64xN],
+) {
+    assert_eq!(s % simd.lane_count(), 0);
+    let (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf) = split_mut_16(x);
+    let (y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf) = split_mut_16(y);
 
-dit16_impl! {
-    pub static DIT16_SCALAR = Fft {
-        core_1: core_::<Scalar>,
-        native: Scalar,
-        x1: Scalar,
-    };
+    // we create a fn pointer that will be force-inlined in release builds
+    // but not in debug builds. this helps keep compile times low, since dead code
+    // elimination handles this well in release builds. and the function pointer indirection
+    // prevents inlining in debug builds.
+    let last_butterfly: fn(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> _ =
+        last_butterfly;
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    pub static DIT16_AVX = Fft {
-        core_1: core_x2::<AvxX2>,
-        native: AvxX2,
-        x1: AvxX1,
-        target: "avx",
-    };
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    pub static DIT16_FMA = Fft {
-        core_1: core_x2::<FmaX2>,
-        native: FmaX2,
-        x1: FmaX1,
-        target: "fma",
-    };
-
-    #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-    pub static DIT16_AVX512 = Fft {
-        core_1: core_x4::<Avx512X2, Avx512X4>,
-        native: Avx512X4,
-        x1: Avx512X1,
-        target: "avx512f",
-    };
+    if read_from_x {
+        for (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf) in
+            izip!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf)
+        {
+            (
+                *x0, *x1, *x2, *x3, *x4, *x5, *x6, *x7, *x8, *x9, *xa, *xb, *xc, *xd, *xe, *xf,
+            ) = last_butterfly(
+                simd, fwd, *x0, *x1, *x2, *x3, *x4, *x5, *x6, *x7, *x8, *x9, *xa, *xb, *xc, *xd,
+                *xe, *xf,
+            );
+        }
+    } else {
+        for (
+            (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+            (y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf),
+        ) in izip!(
+            izip!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, xa, xb, xc, xd, xe, xf),
+            izip!(y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, ya, yb, yc, yd, ye, yf),
+        ) {
+            (
+                *x0, *x1, *x2, *x3, *x4, *x5, *x6, *x7, *x8, *x9, *xa, *xb, *xc, *xd, *xe, *xf,
+            ) = last_butterfly(
+                simd, fwd, *y0, *y1, *y2, *y3, *y4, *y5, *y6, *y7, *y8, *y9, *ya, *yb, *yc, *yd,
+                *ye, *yf,
+            );
+        }
+    }
 }
 
-pub(crate) fn runtime_fft() -> crate::FftImpl {
-    #[cfg(all(feature = "nightly", any(target_arch = "x86_64", target_arch = "x86")))]
-    if x86_feature_detected!("avx512f") {
-        return DIT16_AVX512;
-    }
+struct Dit16<N: nat::Nat>(N);
+impl<N: nat::Nat> nat::Nat for Dit16<N> {
+    const VALUE: usize = N::VALUE;
+}
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-    if x86_feature_detected!("fma") {
-        return DIT16_FMA;
-    } else if x86_feature_detected!("avx") {
-        return DIT16_AVX;
+// size 2
+impl RecursiveFft for Dit16<nat::N0> {
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        read_from_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        _w_init: &[c64xN],
+        _w: &[c64],
+    ) {
+        crate::dit2::stockham_dit2_end(simd, fwd, read_from_x, s, x, y);
     }
+}
 
-    DIT16_SCALAR
+// size 4
+impl RecursiveFft for Dit16<nat::N1> {
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        read_from_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        _w_init: &[c64xN],
+        _w: &[c64],
+    ) {
+        crate::dit4::stockham_dit4_end(simd, fwd, read_from_x, s, x, y);
+    }
+}
+
+// size 8
+impl RecursiveFft for Dit16<nat::N2> {
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        read_from_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        _w_init: &[c64xN],
+        _w: &[c64],
+    ) {
+        crate::dit8::stockham_dit8_end(simd, fwd, read_from_x, s, x, y);
+    }
+}
+
+// size 16
+impl RecursiveFft for Dit16<nat::N3> {
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        read_from_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        _w_init: &[c64xN],
+        _w: &[c64],
+    ) {
+        stockham_dit16_end(simd, fwd, read_from_x, s, x, y);
+    }
+}
+
+impl<N: nat::Nat> RecursiveFft for Dit16<nat::Plus4<N>>
+where
+    Dit16<N>: RecursiveFft,
+{
+    #[inline(always)]
+    fn fft_recurse_impl<c64xN: Pod>(
+        simd: impl FftSimd<c64xN>,
+        fwd: bool,
+        read_from_x: bool,
+        s: usize,
+        x: &mut [c64xN],
+        y: &mut [c64xN],
+        w_init: &[c64xN],
+        w: &[c64],
+    ) {
+        Dit16::<N>::fft_recurse_impl(simd, fwd, !read_from_x, s * 16, y, x, w_init, w);
+        stockham_core(simd, fwd, s, x, y, w_init, w);
+    }
+}
+
+pub(crate) fn fft_impl<c64xN: Pod>(simd: impl FftSimd<c64xN>) -> crate::FftImpl {
+    let fwd = [
+        fn_ptr::<true, Dit16<nat::N0>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N1>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N2>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N3>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N4>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N5>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N6>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N7>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N8>, _, _>(simd),
+        fn_ptr::<true, Dit16<nat::N9>, _, _>(simd),
+    ];
+    let inv = [
+        fn_ptr::<false, Dit16<nat::N0>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N1>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N2>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N3>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N4>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N5>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N6>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N7>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N8>, _, _>(simd),
+        fn_ptr::<false, Dit16<nat::N9>, _, _>(simd),
+    ];
+    crate::FftImpl { fwd, inv }
+}
+
+pub fn fft_impl_dispatch(n: usize) -> [fn(&mut [c64], &mut [c64], &[c64], &[c64]); 2] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        #[cfg(feature = "nightly")]
+        if let Some(simd) = pulp::x86::V4::try_new() {
+            if n >= 16 * simd.lane_count() {
+                return fft_impl(simd).make_fn_ptr(n);
+            }
+        }
+        if let Some(simd) = pulp::x86::V3::try_new() {
+            if n >= 16 * simd.lane_count() {
+                return fft_impl(simd).make_fn_ptr(n);
+            }
+        }
+    }
+    fft_impl(crate::fft_simd::Scalar).make_fn_ptr(n)
 }
