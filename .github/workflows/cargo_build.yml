@@ -1,0 +1,45 @@
+# Build concrete-fft
+name: Cargo Build
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-builds:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+
+      - name: Get rust toolchain to use for checks and lints
+        id: toolchain
+        run: |
+          echo "rs-toolchain=$(make rs_toolchain)" >> "${GITHUB_OUTPUT}"
+
+      - name: Run pcc checks
+        run: |
+          make pcc
+
+      - name: Build release
+        run: |
+          make build
+
+      - name: Build release no-std
+        run: |
+          make build_no_std
+
+      - name: Build benchmarks
+        run: |
+          make build_bench

@@ -48,45 +48,52 @@ fmt: install_rs_check_toolchain
 check_fmt: install_rs_check_toolchain
 	cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" fmt --check
 
-.PHONY: clippy # Run clippy lints enabling the boolean, shortint, integer
+.PHONY: clippy # Run clippy lints
 clippy: install_rs_check_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" clippy --all-targets \
-		-- --no-deps -D warnings
-
-.PHONY: clippy_all_targets # Run clippy lints on all targets (benches, examples, etc.)
-clippy_all_targets:
-	RUSTFLAGS="$(RUSTFLAGS)" cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" clippy --all-targets \
-		-- --no-deps -D warnings
-
-.PHONY: clippy_all # Run all clippy targets
-clippy_all: clippy clippy_all_targets
+		--features=serde -- --no-deps -D warnings
 
 .PHONY: build
 build: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release \
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release
 
-.PHONY: test_default
-test_default: install_rs_build_toolchain
+.PHONY: build_no_std
+build_no_std: install_rs_build_toolchain
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release \
+		--no-default-features
+
+.PHONY: build_bench
+build_bench: install_rs_check_toolchain
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench \
+		--no-run
+
+.PHONY: test
+test: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release
+
+.PHONY: test_serde
+test_serde: install_rs_build_toolchain
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release
+		--features=serde
 
 .PHONY: test_nightly
 test_nightly: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
 		--features=nightly
 
-.PHONY: test_no_default
-test_no_default: install_rs_build_toolchain
+.PHONY: test_no_std
+test_no_std: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
 		--no-default-features
 
-.PHONY: test_no_default_nightly
-test_no_default_nightly: install_rs_build_toolchain
+.PHONY: test_no_std_nightly
+test_no_std_nightly: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
 		--no-default-features \
 		--features=nightly
 
 .PHONY: test_all
-test_all: test_default test_nightly test_no_default test_no_default_nightly
+test_all: test test_serde test_nightly test_no_std test_no_std_nightly
 
 .PHONY: doc # Build rust doc
 doc: install_rs_check_toolchain
@@ -99,7 +106,7 @@ bench: install_rs_check_toolchain
 		--features=$(AVX512_FEATURE)
 
 .PHONY: pcc # pcc stands for pre commit checks
-pcc: check_fmt doc clippy_all
+pcc: check_fmt doc clippy
 
 .PHONY: conformance # Automatically fix problems that can be fixed
 conformance: fmt
