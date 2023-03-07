@@ -1,0 +1,9 @@
+[profile.bench]
+region = "eu-west-3"
+image_id = "ami-04deffe45b5b236fd"
+instance_type = "m6i.metal"
+
+[command.bench]
+workflow = "benchmark.yml"
+profile = "bench"
+check_run_name = "FFT AWS Benchmarks"
