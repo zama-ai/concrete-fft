@@ -1,6 +1,6 @@
 Concrete-FFT is a pure Rust high performance fast Fourier transform library
 that processes vectors of sizes that are powers of two. It was made to be used
-as a backend in Zama's `concrete` library.
+as a backend in Zama's [TFHE-rs](https://docs.zama.ai/tfhe-rs) library.
 
 This library provides two FFT modules:
  - The ordered module FFT applies a forward/inverse FFT that takes its input in standard
@@ -66,7 +66,7 @@ for (actual, expected) in transformed_inv.iter().map(|z| z / N as f64).zip(data)
 ## Links
 
  - [Zama](https://www.zama.ai/)
- - [Concrete](https://github.com/zama-ai/concrete)
+ - [TFHE-rs Sources](https://github.com/zama-ai/tfhe-rs)
 
 ## License
 
@@ -74,7 +74,7 @@ This software is distributed under the BSD-3-Clause-Clear license with an
 exemption that gives rights to use our patents for research, evaluation and
 prototyping purposes, as well as for your personal projects.
 
-If you want to use Concrete in a commercial product however, you will need to
+If you want to use concrete-fft in a commercial product however, you will need to
 purchase a separate commercial licence.
 
 If you have any questions, please contact us at `hello@zama.ai.`

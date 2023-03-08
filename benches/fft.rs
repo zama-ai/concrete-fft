@@ -120,13 +120,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
         let (mut src, mut stack) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
 
-        c.bench_function(&format!("rustfft-fwd-{}", n), |b| {
+        c.bench_function(&format!("rustfft-fwd-{n}"), |b| {
             let mut planner = FftPlannerAvx::<f64>::new().unwrap();
             let fwd_rustfft = planner.plan_fft_forward(n);
             b.iter(|| fwd_rustfft.process_outofplace_with_scratch(&mut src, &mut dst, &mut scratch))
         });
 
-        c.bench_function(&format!("fftw-fwd-{}", n), |b| {
+        c.bench_function(&format!("fftw-fwd-{n}"), |b| {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
             b.iter(|| {
                 fwd_fftw.execute(&mut src, &mut dst);
@@ -138,19 +138,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 concrete_fft::ordered::Method::Measure(bench_duration),
             );
 
-            c.bench_function(&format!("concrete-fwd-{}", n), |b| {
+            c.bench_function(&format!("concrete-fwd-{n}"), |b| {
                 b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
             });
         }
-        c.bench_function(&format!("unordered-fwd-{}", n), |b| {
+        c.bench_function(&format!("unordered-fwd-{n}"), |b| {
             b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
         });
-        c.bench_function(&format!("unordered-inv-{}", n), |b| {
+        c.bench_function(&format!("unordered-inv-{n}"), |b| {
             b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
         });
 
         // memcpy
-        c.bench_function(&format!("memcpy-{}", n), |b| {
+        c.bench_function(&format!("memcpy-{n}"), |b| {
             b.iter(|| unsafe {
                 std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
             })
