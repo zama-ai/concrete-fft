@@ -1144,7 +1144,7 @@ mod tests {
             );
             let base_n = plan.algo().1;
             let mut mem = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-            let stack = DynStack::new(&mut *mem);
+            let stack = DynStack::new(&mut mem);
             plan.fwd(&mut z, stack);
 
             for i in 0..n {
@@ -1177,7 +1177,7 @@ mod tests {
                 },
             );
             let mut mem = GlobalMemBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = DynStack::new(&mut *mem);
+            let mut stack = DynStack::new(&mut mem);
             plan.fwd(&mut z, stack.rb_mut());
             plan.inv(&mut z, stack);
 
@@ -1232,7 +1232,7 @@ mod tests_serde {
                     .unwrap()
                     .or(plan2.fft_scratch().unwrap()),
             );
-            let mut stack = DynStack::new(&mut *mem);
+            let mut stack = DynStack::new(&mut mem);
 
             plan1.fwd(&mut z, stack.rb_mut());
 

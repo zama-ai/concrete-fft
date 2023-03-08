@@ -42,7 +42,7 @@ jobs:
           make build_no_std
 
       - name: Build benchmarks
-        if: ${{ matrix.os }} == "ubuntu-latest"
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt install -y libfftw3-dev
           make build_bench

@@ -133,7 +133,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
                 let (mut src, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
 
-                c.bench_function(&format!("rustfft-fwd-{}", n), |b| {
+                c.bench_function(&format!("rustfft-fwd-{n}"), |b| {
                     b.iter(|| {
                         fwd_rustfft.process_outofplace_with_scratch(
                             &mut src,
@@ -143,7 +143,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     })
                 });
 
-                c.bench_function(&format!("fftw-fwd-{}", n), |b| {
+                c.bench_function(&format!("fftw-fwd-{n}"), |b| {
                     b.iter(|| {
                         fwd_fftw.execute(&mut src, &mut dst);
                     })
@@ -152,21 +152,21 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
 
-                c.bench_function(&format!("concrete-fwd-{}", n), |b| {
-                    b.iter(|| ordered.fwd(&mut *dst, stack.rb_mut()))
+                c.bench_function(&format!("concrete-fwd-{n}"), |b| {
+                    b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
                 });
             }
             {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
 
-                c.bench_function(&format!("unordered-fwd-{}", n), |b| {
+                c.bench_function(&format!("unordered-fwd-{n}"), |b| {
                     b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
                 });
             }
             {
                 let (mut dst, mut stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
 
-                c.bench_function(&format!("unordered-inv-{}", n), |b| {
+                c.bench_function(&format!("unordered-inv-{n}"), |b| {
                     b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
                 });
             }
@@ -177,7 +177,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
             let (src, _) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
 
-            c.bench_function(&format!("memcpy-{}", n), |b| {
+            c.bench_function(&format!("memcpy-{n}"), |b| {
                 b.iter(|| unsafe {
                     std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
                 })
