@@ -102,7 +102,7 @@ doc: install_rs_check_toolchain
 
 .PHONY: bench # Run benchmarks
 bench: install_rs_check_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench \
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench --bench fft \
 		--features=$(AVX512_FEATURE)
 
 .PHONY: pcc # pcc stands for pre commit checks
