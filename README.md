@@ -14,11 +14,15 @@ This library provides two FFT modules:
  convolution. The only operations that are performed in the Fourier domain are elementwise, and
  so the order of the coefficients does not affect the results.
 
+Additionally, an optional 128-bit negacyclic FFT module is provided.
+
 ## Features
 
  - `std` (default): This enables runtime arch detection for accelerated SIMD
    instructions, and an FFT plan that measures the various implementations to
    choose the fastest one at runtime.
+ - `fft128`: This flag provides access to the 128-bit FFT, which is accessible in the
+   [`fft128`] module.
  - `nightly`: This enables unstable Rust features to further speed up the FFT,
    by enabling AVX512F instructions on CPUs that support them. This feature
    requires a nightly Rust

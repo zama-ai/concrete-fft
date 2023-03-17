@@ -168,6 +168,118 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             })
         });
     }
+    #[cfg(feature = "fft128")]
+    for n in [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
+        use concrete_fft::fft128::*;
+        let twid_re0 = vec![0.0; n];
+        let twid_re1 = vec![0.0; n];
+        let twid_im0 = vec![0.0; n];
+        let twid_im1 = vec![0.0; n];
+
+        let mut data_re0 = vec![0.0; n];
+        let mut data_re1 = vec![0.0; n];
+        let mut data_im0 = vec![0.0; n];
+        let mut data_im1 = vec![0.0; n];
+
+        c.bench_function(&format!("concrete-fft128-fwd-{n}"), |bench| {
+            bench.iter(|| {
+                negacyclic_fwd_fft_scalar(
+                    &mut data_re0,
+                    &mut data_re1,
+                    &mut data_im0,
+                    &mut data_im1,
+                    &twid_re0,
+                    &twid_re1,
+                    &twid_im0,
+                    &twid_im1,
+                );
+            });
+        });
+
+        c.bench_function(&format!("concrete-fft128-inv-{n}"), |bench| {
+            bench.iter(|| {
+                negacyclic_inv_fft_scalar(
+                    &mut data_re0,
+                    &mut data_re1,
+                    &mut data_im0,
+                    &mut data_im1,
+                    &twid_re0,
+                    &twid_re1,
+                    &twid_im0,
+                    &twid_im1,
+                );
+            });
+        });
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if let Some(simd) = pulp::x86::V3::try_new() {
+            c.bench_function(&format!("concrete-fft128-avx-fwd-{n}"), |bench| {
+                bench.iter(|| {
+                    negacyclic_fwd_fft_avxfma(
+                        simd,
+                        &mut data_re0,
+                        &mut data_re1,
+                        &mut data_im0,
+                        &mut data_im1,
+                        &twid_re0,
+                        &twid_re1,
+                        &twid_im0,
+                        &twid_im1,
+                    );
+                });
+            });
+            c.bench_function(&format!("concrete-fft128-avx-inv-{n}"), |bench| {
+                bench.iter(|| {
+                    negacyclic_inv_fft_avxfma(
+                        simd,
+                        &mut data_re0,
+                        &mut data_re1,
+                        &mut data_im0,
+                        &mut data_im1,
+                        &twid_re0,
+                        &twid_re1,
+                        &twid_im0,
+                        &twid_im1,
+                    );
+                });
+            });
+        }
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(feature = "nightly")]
+        if let Some(simd) = pulp::x86::V4::try_new() {
+            c.bench_function(&format!("concrete-fft128-avx512-fwd-{n}"), |bench| {
+                bench.iter(|| {
+                    negacyclic_fwd_fft_avx512(
+                        simd,
+                        &mut data_re0,
+                        &mut data_re1,
+                        &mut data_im0,
+                        &mut data_im1,
+                        &twid_re0,
+                        &twid_re1,
+                        &twid_im0,
+                        &twid_im1,
+                    );
+                });
+            });
+            c.bench_function(&format!("concrete-fft128-avx512-inv-{n}"), |bench| {
+                bench.iter(|| {
+                    negacyclic_inv_fft_avx512(
+                        simd,
+                        &mut data_re0,
+                        &mut data_re1,
+                        &mut data_im0,
+                        &mut data_im1,
+                        &twid_re0,
+                        &twid_re1,
+                        &twid_im0,
+                        &twid_im1,
+                    );
+                });
+            });
+        }
+    }
 }
 
 criterion_group!(benches, criterion_benchmark);
