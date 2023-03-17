@@ -1,4 +1,4 @@
-use concrete_fft::c64;
+use concrete_fft::{c64, unordered::MonomialPlan};
 use core::ptr::NonNull;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dyn_stack::{PodStack, ReborrowMut, StackReq};
@@ -153,6 +153,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("memcpy-{n}"), |b| {
             b.iter(|| unsafe {
                 std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
+            })
+        });
+
+        let monomial_plan = MonomialPlan::new(n, unordered.algo().1);
+        c.bench_function(&format!("fwd-monomial-{n}"), |b| {
+            let mut degree = 0;
+            b.iter(|| {
+                degree += 1;
+                if degree == n {
+                    degree = 0;
+                }
+                monomial_plan.fwd_monomial(degree, &mut dst);
             })
         });
     }
