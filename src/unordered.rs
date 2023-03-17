@@ -511,6 +511,17 @@ pub struct Plan {
     n: usize,
 }
 
+/// Unordered monomial FFT plan.
+///
+/// This type holds a forward FFT plan and twiddling factors for monomials of a specific size.
+/// The size must be a power of two.
+#[derive(Clone)]
+pub struct MonomialPlan {
+    twiddles: ABox<[c64]>,
+    indices: ABox<[usize]>,
+    base_n: usize,
+}
+
 impl core::fmt::Debug for Plan {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Plan")
@@ -952,7 +963,125 @@ impl Plan {
     }
 }
 
-#[cfg(any(test, feature = "serde"))]
+impl MonomialPlan {
+    /// Returns a new FFT plan for the given vector size, selected by the provided `base_n` from a
+    /// compatible [`Plan`].
+    ///
+    /// # Panics
+    ///
+    /// - Panics if `n` is not a power of two.
+    /// - Panics if `base_n` is not a power of two.
+    /// - Panics if `base_n > n`.
+    ///
+    /// # Example
+    /// ```
+    /// use concrete_fft::unordered::MonomialPlan;
+    ///
+    /// let plan = MonomialPlan::new(32, 4);
+    /// ```
+    pub fn new(n: usize, base_n: usize) -> Self {
+        assert!(n.is_power_of_two());
+        assert!(base_n.is_power_of_two());
+
+        let nan = c64 {
+            re: f64::NAN,
+            im: f64::NAN,
+        };
+        let mut twiddles = avec![nan; n].into_boxed_slice();
+
+        let theta = -2.0 / n as f64;
+        for (i, twid) in twiddles.iter_mut().enumerate() {
+            let (s, c) = sincospi64(theta * i as f64);
+            *twid = c64 { re: c, im: s };
+        }
+        let mut indices = avec![0usize; n].into_boxed_slice();
+
+        let nbits = n.trailing_zeros();
+        let base_nbits = base_n.trailing_zeros();
+
+        for (i, idx) in indices.iter_mut().enumerate() {
+            *idx = bit_rev_twice_inv(nbits, base_nbits, i);
+        }
+
+        Self {
+            twiddles,
+            base_n,
+            indices,
+        }
+    }
+
+    /// Returns the vector size of the FFT.
+    pub fn fft_size(&self) -> usize {
+        self.twiddles.len()
+    }
+
+    /// Returns the size of the base ordered FFT.
+    pub fn base_n(&self) -> usize {
+        self.base_n
+    }
+
+    /// Performs a forward FFT on the implicit polynomial `X^degree`, storing the result in `buf`.
+    /// The coefficients are permuted in a way that they're compatible with any other FFT of the
+    /// same internal base ordered size.
+    pub fn fwd_monomial(&self, degree: usize, buf: &mut [c64]) {
+        struct Impl<'a> {
+            this: &'a MonomialPlan,
+            degree: usize,
+            buf: &'a mut [c64],
+        }
+
+        impl pulp::WithSimd for Impl<'_> {
+            type Output = ();
+
+            #[inline(always)]
+            fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+                let Self { this, degree, buf } = self;
+                let _ = simd;
+                assert_eq!(this.fft_size(), buf.len());
+                assert!(degree < this.fft_size());
+
+                let twiddles = &*this.twiddles;
+                let indices = &*this.indices;
+
+                let n = this.fft_size();
+                let base_n = this.base_n;
+                let n_mask = n - 1;
+
+                assert!(n.is_power_of_two());
+                assert_eq!(twiddles.len(), n);
+
+                match n / base_n {
+                    1 => {
+                        // n == base_n
+                        for (i, z) in buf.iter_mut().enumerate() {
+                            *z = twiddles[(i * degree) & n_mask];
+                        }
+                    }
+                    2 => {
+                        // n == 2 * base_n
+                        let (z0, z1) = buf.split_at_mut(n / 2);
+                        for (i, (z0, z1)) in izip!(z0, z1).enumerate() {
+                            *z0 = twiddles[((2 * i) * degree) & n_mask];
+                            *z1 = twiddles[((2 * i + 1) * degree) & n_mask];
+                        }
+                    }
+                    _ => {
+                        for (z, &idx) in buf.iter_mut().zip(indices.iter()) {
+                            *z = twiddles[(idx * degree) & n_mask];
+                        }
+                    }
+                }
+            }
+        }
+
+        pulp::Arch::new().dispatch(Impl {
+            this: self,
+            degree,
+            buf,
+        })
+    }
+}
+
 #[inline]
 fn bit_rev(nbits: u32, i: usize) -> usize {
     i.reverse_bits() >> (usize::BITS - nbits)
@@ -965,6 +1094,14 @@ fn bit_rev_twice(nbits: u32, base_nbits: u32, i: usize) -> usize {
     let bottom_mask = (1 << base_nbits) - 1;
     let bottom_bits = bit_rev(base_nbits, i_rev);
     (i_rev & !bottom_mask) | bottom_bits
+}
+
+#[inline]
+fn bit_rev_twice_inv(nbits: u32, base_nbits: u32, i: usize) -> usize {
+    let bottom_mask = (1 << base_nbits) - 1;
+    let bottom_bits = bit_rev(base_nbits, i);
+    let i_rev = (i & !bottom_mask) | bottom_bits;
+    bit_rev(nbits, i_rev)
 }
 
 #[cfg(test)]
@@ -1007,6 +1144,39 @@ mod tests {
             for (i, z_target) in z_target.iter().enumerate() {
                 let idx = bit_rev_twice(n.trailing_zeros(), base_n.trailing_zeros(), i);
                 assert!((z[idx] - z_target).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fwd_monomial() {
+        for n in [256, 512, 1024] {
+            for base_n in [32, n, n / 2, n / 4, n / 8] {
+                for _ in 0..10 {
+                    let mut z = vec![c64::default(); n];
+                    let degree = random::<usize>() % n;
+                    z[degree] = c64 { re: 1.0, im: 0.0 };
+
+                    let plan = Plan::new(
+                        n,
+                        Method::UserProvided {
+                            base_algo: FftAlgo::Dif4,
+                            base_n,
+                        },
+                    );
+                    let mut mem = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+                    let stack = PodStack::new(&mut mem);
+
+                    let mut z_target = z.clone();
+                    plan.fwd(&mut z_target, stack);
+
+                    let monomial_plan = MonomialPlan::new(n, base_n);
+                    monomial_plan.fwd_monomial(degree, &mut z);
+
+                    for (z, z_target) in z.iter().zip(z_target.iter()) {
+                        assert!((z - z_target).abs() < 1e-12);
+                    }
+                }
             }
         }
     }
