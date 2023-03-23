@@ -214,7 +214,18 @@ impl FftSimd<c64> for Scalar {
 
     #[inline(always)]
     fn mul(self, a: c64, b: c64) -> c64 {
-        a * b
+        let ab = a;
+        let xy = b;
+
+        let a = ab.re;
+        let b = ab.im;
+        let x = xy.re;
+        let y = xy.im;
+
+        c64 {
+            re: f64::mul_add(a, x, -b * y),
+            im: f64::mul_add(a, y, b * x),
+        }
     }
 }
 
