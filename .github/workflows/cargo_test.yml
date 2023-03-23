@@ -30,13 +30,17 @@ jobs:
           override: true
 
       - name: Test debug
-        run: make test
+        run: |
+          make test
+          make test FFT128_SUPPORT=ON
 
       - name: Test serialization
         run: make test_serde
 
       - name: Test no-std
-        run: make test_no_std
+        run: |
+          make test_no_std
+          make test_no_std FFT128_SUPPORT=ON
 
   cargo-tests-nightly:
     runs-on: ${{ matrix.runner_type }}
@@ -53,7 +57,11 @@ jobs:
           override: true
 
       - name: Test nightly
-        run: make test_nightly
+        run: |
+          make test_nightly
+          make test_nightly FFT128_SUPPORT=ON
 
       - name: Test no-std nightly
-        run: make test_no_std_nightly
+        run: |
+          make test_no_std_nightly
+          make test_no_std_nightly FFT128_SUPPORT=ON
