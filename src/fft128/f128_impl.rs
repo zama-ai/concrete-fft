@@ -618,7 +618,7 @@ impl f128 {
     ];
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64", doc))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg_attr(docsrs, doc(cfg(any(target_arch = "x86", target_arch = "x86_64"))))]
 pub mod x86 {
     use pulp::x86::{f64x4, V3};

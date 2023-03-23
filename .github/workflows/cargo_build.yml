@@ -39,13 +39,16 @@ jobs:
       - name: Build release
         run: |
           make build
+          make build FFT128_SUPPORT=ON
 
       - name: Build release no-std
         run: |
           make build_no_std
+          make build_no_std FFT128_SUPPORT=ON
 
       - name: Build benchmarks
         if: matrix.runner_type == 'ubuntu-latest'
         run: |
           sudo apt install -y libfftw3-dev
           make build_bench
+          FFT128_SUPPORT=ON make build_bench

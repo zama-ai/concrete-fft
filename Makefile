@@ -5,6 +5,7 @@ RS_BUILD_TOOLCHAIN:=nightly
 CARGO_RS_BUILD_TOOLCHAIN:=+$(RS_BUILD_TOOLCHAIN)
 MIN_RUST_VERSION:=1.65
 AVX512_SUPPORT?=OFF
+FFT128_SUPPORT?=OFF
 # This is done to avoid forgetting it, we still precise the RUSTFLAGS in the commands to be able to
 # copy paste the command in the terminal and change them if required without forgetting the flags
 export RUSTFLAGS?=-C target-cpu=native
@@ -13,6 +14,12 @@ ifeq ($(AVX512_SUPPORT),ON)
 		AVX512_FEATURE=nightly
 else
 		AVX512_FEATURE=
+endif
+
+ifeq ($(FFT128_SUPPORT),ON)
+		FFT128_FEATURE=fft128
+else
+		FFT128_FEATURE=
 endif
 
 .PHONY: rs_check_toolchain # Echo the rust toolchain used for checks
@@ -55,21 +62,25 @@ clippy: install_rs_check_toolchain
 
 .PHONY: build
 build: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: build_no_std
 build_no_std: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) build --release \
-		--no-default-features
+		--no-default-features \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: build_bench
 build_bench: install_rs_check_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench \
-		--no-run
+		--no-run \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: test
 test: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: test_serde
 test_serde: install_rs_build_toolchain
@@ -79,18 +90,19 @@ test_serde: install_rs_build_toolchain
 .PHONY: test_nightly
 test_nightly: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
-		--features=nightly
+		--features=nightly,$(FFT128_FEATURE)
 
 .PHONY: test_no_std
 test_no_std: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
-		--no-default-features
+		--no-default-features \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: test_no_std_nightly
 test_no_std_nightly: install_rs_build_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
 		--no-default-features \
-		--features=nightly
+		--features=nightly,$(FFT128_FEATURE)
 
 .PHONY: test_all
 test_all: test test_serde test_nightly test_no_std test_no_std_nightly
@@ -103,7 +115,8 @@ doc: install_rs_check_toolchain
 .PHONY: bench # Run benchmarks
 bench: install_rs_check_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench --bench fft \
-		--features=$(AVX512_FEATURE)
+		--features=$(AVX512_FEATURE) \
+		--features=$(FFT128_FEATURE)
 
 .PHONY: pcc # pcc stands for pre commit checks
 pcc: check_fmt doc clippy
