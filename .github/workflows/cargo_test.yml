@@ -16,10 +16,10 @@ concurrency:
 
 jobs:
   cargo-tests:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner_type }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        runner_type: [ubuntu-latest, macos-latest, windows-latest, m1mac]
     steps:
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
 
@@ -39,10 +39,10 @@ jobs:
         run: make test_no_std
 
   cargo-tests-nightly:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner_type }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        runner_type: [ubuntu-latest, macos-latest, windows-latest, m1mac]
     steps:
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
 

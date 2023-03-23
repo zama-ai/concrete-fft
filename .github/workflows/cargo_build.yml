@@ -16,11 +16,11 @@ concurrency:
 
 jobs:
   cargo-builds:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner_type }}
 
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        runner_type: [ubuntu-latest, macos-latest, windows-latest, m1mac]
       fail-fast: false
 
     steps:
@@ -45,7 +45,7 @@ jobs:
           make build_no_std
 
       - name: Build benchmarks
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.runner_type == 'ubuntu-latest'
         run: |
           sudo apt install -y libfftw3-dev
           make build_bench
