@@ -2,6 +2,9 @@
 name: Cargo Build
 
 on:
+  push:
+    branches:
+      - 'main'
   pull_request:
 
 env:
