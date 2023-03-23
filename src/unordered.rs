@@ -1215,7 +1215,6 @@ mod tests {
         }
     }
 
-    #[cfg(all(any(target_arch = "x86", target_arch = "x86_64")))]
     #[test]
     fn test_equivalency() {
         use num_complex::Complex;

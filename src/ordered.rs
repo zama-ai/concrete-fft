@@ -457,9 +457,9 @@ mod tests {
 
     #[test]
     fn test_fft() {
+        test_fft_simd(crate::fft_simd::Scalar);
         #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
         {
-            test_fft_simd(crate::fft_simd::Scalar);
             if let Some(simd) = pulp::x86::V3::try_new() {
                 test_fft_simd(simd);
             }
