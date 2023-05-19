@@ -2,6 +2,8 @@ use concrete_fft::{c64, unordered::MonomialPlan};
 use core::ptr::NonNull;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dyn_stack::{PodStack, ReborrowMut, StackReq};
+use serde::Serialize;
+use std::{fs, path::PathBuf};
 
 struct FftwAlloc {
     bytes: NonNull<core::ffi::c_void>,
@@ -88,7 +90,29 @@ impl PlanInterleavedC64 {
     }
 }
 
-pub fn criterion_benchmark(c: &mut Criterion) {
+#[derive(Serialize)]
+struct BenchmarkParametersRecord {
+    display_name: String,
+    polynomial_size: usize,
+}
+
+/// Writes benchmarks parameters to disk in JSON format.
+fn write_to_json(bench_id: &str, display_name: impl Into<String>, polynomial_size: usize) {
+    let record = BenchmarkParametersRecord {
+        display_name: display_name.into(),
+        polynomial_size,
+    };
+
+    let mut params_directory = ["benchmarks_parameters", bench_id]
+        .iter()
+        .collect::<PathBuf>();
+    fs::create_dir_all(&params_directory).unwrap();
+    params_directory.push("parameters.json");
+
+    fs::write(params_directory, serde_json::to_string(&record).unwrap()).unwrap();
+}
+
+pub fn bench_ffts(c: &mut Criterion) {
     for n in [
         1 << 8,
         1 << 9,
@@ -120,44 +144,60 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
         let (mut src, mut stack) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
 
-        c.bench_function(&format!("rustfft-fwd-{n}"), |b| {
+        let bench_id = format!("rustfft-fwd-{n}");
+        c.bench_function(&bench_id, |b| {
             let mut planner = FftPlannerAvx::<f64>::new().unwrap();
             let fwd_rustfft = planner.plan_fft_forward(n);
             b.iter(|| fwd_rustfft.process_outofplace_with_scratch(&mut src, &mut dst, &mut scratch))
         });
+        write_to_json(&bench_id, "rustfft-fwd", n);
 
-        c.bench_function(&format!("fftw-fwd-{n}"), |b| {
+        let bench_id = format!("fftw-fwd-{n}");
+        c.bench_function(&bench_id, |b| {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
             b.iter(|| {
                 fwd_fftw.execute(&mut src, &mut dst);
             })
         });
+        write_to_json(&bench_id, "fftw-fwd", n);
+
         if n <= 1024 {
             let ordered = concrete_fft::ordered::Plan::new(
                 n,
                 concrete_fft::ordered::Method::Measure(bench_duration),
             );
 
-            c.bench_function(&format!("concrete-fwd-{n}"), |b| {
+            let bench_id = format!("concrete-fwd-{n}");
+            c.bench_function(&bench_id, |b| {
                 b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
             });
+            write_to_json(&bench_id, "concrete-fwd", n);
         }
-        c.bench_function(&format!("unordered-fwd-{n}"), |b| {
+
+        let bench_id = format!("unordered-fwd-{n}");
+        c.bench_function(&bench_id, |b| {
             b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
         });
-        c.bench_function(&format!("unordered-inv-{n}"), |b| {
+        write_to_json(&bench_id, "unordered-fwd", n);
+
+        let bench_id = format!("unordered-inv-{n}");
+        c.bench_function(&bench_id, |b| {
             b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
         });
+        write_to_json(&bench_id, "unordered-inv", n);
 
         // memcpy
-        c.bench_function(&format!("memcpy-{n}"), |b| {
+        let bench_id = format!("memcpy-{n}");
+        c.bench_function(&bench_id, |b| {
             b.iter(|| unsafe {
                 std::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), n);
             })
         });
+        write_to_json(&bench_id, "memcpy", n);
 
         let monomial_plan = MonomialPlan::new(n, unordered.algo().1);
-        c.bench_function(&format!("fwd-monomial-{n}"), |b| {
+        let bench_id = format!("fwd-monomial-{n}");
+        c.bench_function(&bench_id, |b| {
             let mut degree = 0;
             b.iter(|| {
                 degree += 1;
@@ -167,8 +207,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 monomial_plan.fwd_monomial(degree, &mut dst);
             })
         });
+        write_to_json(&bench_id, "fwd-monomial", n);
     }
-    #[cfg(feature = "fft128")]
+}
+
+#[cfg(feature = "fft128")]
+pub fn bench_fft128(c: &mut Criterion) {
     for n in [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
         use concrete_fft::fft128::*;
         let twid_re0 = vec![0.0; n];
@@ -181,7 +225,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let mut data_im0 = vec![0.0; n];
         let mut data_im1 = vec![0.0; n];
 
-        c.bench_function(&format!("concrete-fft128-fwd-{n}"), |bench| {
+        let bench_id = format!("concrete-fft128-fwd-{n}");
+        c.bench_function(&bench_id, |bench| {
             bench.iter(|| {
                 negacyclic_fwd_fft_scalar(
                     &mut data_re0,
@@ -195,8 +240,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 );
             });
         });
+        write_to_json(&bench_id, "fft128-fwd", n);
 
-        c.bench_function(&format!("concrete-fft128-inv-{n}"), |bench| {
+        let bench_id = format!("concrete-fft128-inv-{n}");
+        c.bench_function(&bench_id, |bench| {
             bench.iter(|| {
                 negacyclic_inv_fft_scalar(
                     &mut data_re0,
@@ -210,10 +257,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 );
             });
         });
+        write_to_json(&bench_id, "fft128-inv", n);
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if let Some(simd) = pulp::x86::V3::try_new() {
-            c.bench_function(&format!("concrete-fft128-avx-fwd-{n}"), |bench| {
+            let bench_id = format!("concrete-fft128-avx-fwd-{n}");
+            c.bench_function(&bench_id, |bench| {
                 bench.iter(|| {
                     negacyclic_fwd_fft_avxfma(
                         simd,
@@ -228,7 +277,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     );
                 });
             });
-            c.bench_function(&format!("concrete-fft128-avx-inv-{n}"), |bench| {
+            write_to_json(&bench_id, "fft128-fwd-avx", n);
+
+            let bench_id = format!("concrete-fft128-avx-inv-{n}");
+            c.bench_function(&bench_id, |bench| {
                 bench.iter(|| {
                     negacyclic_inv_fft_avxfma(
                         simd,
@@ -243,12 +295,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     );
                 });
             });
+            write_to_json(&bench_id, "fft128-inv-avx", n);
         }
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[cfg(feature = "nightly")]
         if let Some(simd) = pulp::x86::V4::try_new() {
-            c.bench_function(&format!("concrete-fft128-avx512-fwd-{n}"), |bench| {
+            let bench_id = format!("concrete-fft128-avx512-fwd-{n}");
+            c.bench_function(&bench_id, |bench| {
                 bench.iter(|| {
                     negacyclic_fwd_fft_avx512(
                         simd,
@@ -263,7 +317,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     );
                 });
             });
-            c.bench_function(&format!("concrete-fft128-avx512-inv-{n}"), |bench| {
+            write_to_json(&bench_id, "fft128-fwd-avx512", n);
+
+            let bench_id = format!("concrete-fft128-avx512-inv-{n}");
+            c.bench_function(&bench_id, |bench| {
                 bench.iter(|| {
                     negacyclic_inv_fft_avx512(
                         simd,
@@ -278,9 +335,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     );
                 });
             });
+            write_to_json(&bench_id, "fft128-inv-avx512", n);
         }
     }
 }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+criterion_group!(fft, bench_ffts);
+#[cfg(feature = "fft128")]
+criterion_group!(fft128, bench_fft128);
+
+#[cfg(not(feature = "fft128"))]
+criterion_main!(fft);
+#[cfg(feature = "fft128")]
+criterion_main!(fft, fft128);

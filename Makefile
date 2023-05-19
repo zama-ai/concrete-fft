@@ -75,6 +75,7 @@ build_no_std: install_rs_build_toolchain
 build_bench: install_rs_check_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench \
 		--no-run \
+		--features=serde \
 		--features=$(FFT128_FEATURE)
 
 .PHONY: test
@@ -115,6 +116,7 @@ doc: install_rs_check_toolchain
 .PHONY: bench # Run benchmarks
 bench: install_rs_check_toolchain
 	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) bench --bench fft \
+		--features=serde \
 		--features=$(AVX512_FEATURE) \
 		--features=$(FFT128_FEATURE)
 
