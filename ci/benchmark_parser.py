@@ -2,7 +2,7 @@
 benchmark_parser
 ----------------
 
-Parse criterion benchmark or keys size results.
+Parse criterion benchmark.
 """
 import argparse
 import csv
@@ -13,9 +13,7 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('results',
-                    help='Location of criterion benchmark results directory.'
-                         'If the --key-size option is used, then the value would have to point to'
-                         'a CSV file.')
+                    help='Location of criterion benchmark results directory.')
 parser.add_argument('output_file', help='File storing parsed results')
 parser.add_argument('-d', '--database', dest='database',
                     help='Name of the database used to store results')
@@ -33,6 +31,8 @@ parser.add_argument('--name-suffix', dest='name_suffix', default='',
                     help='Suffix to append to each of the result test names')
 parser.add_argument('--append-results', dest='append_results', action='store_true',
                     help='Append parsed results to an existing file')
+parser.add_argument('--backend', dest='backend', default='cpu',
+                    help='Backend on which benchmarks have run')
 
 
 def recursive_parse(directory, name_suffix=""):
@@ -43,10 +43,12 @@ def recursive_parse(directory, name_suffix=""):
     :param directory: path to directory that contains raw results as :class:`pathlib.Path`
     :param name_suffix: a :class:`str` suffix to apply to each test name found
 
-    :return: :class:`list` of data points
+    :return: :class:`tuple` of :class:`list`s as ``(data points, parsing failures)``
     """
     excluded_directories = ["child_generate", "fork", "parent_generate", "report"]
-    result_values = list()
+    result_values = []
+    parsing_failures = []
+
     for dire in directory.iterdir():
         if dire.name in excluded_directories or not dire.is_dir():
             continue
@@ -55,11 +57,27 @@ def recursive_parse(directory, name_suffix=""):
                 continue
 
             test_name = parse_benchmark_file(subdir)
+            try:
+                params, display_name = get_parameters(test_name)
+            except Exception as err:
+                parsing_failures.append((test_name, f"failed to get parameters: {err}"))
+                continue
+
             for stat_name, value in parse_estimate_file(subdir).items():
                 test_name_parts = list(filter(None, [test_name, stat_name, name_suffix]))
-                result_values.append({"value": value, "test": "_".join(test_name_parts)})
+                result_values.append(
+                    {
+                        "value": value,
+                        "test": "_".join(test_name_parts),
+                        "name": display_name,
+                        "class": "evaluate",
+                        "type": "latency",
+                        "operator": "",
+                        "params": params
+                    }
+                )
 
-    return result_values
+    return result_values, parsing_failures
 
 
 def parse_benchmark_file(directory):
@@ -89,6 +107,22 @@ def parse_estimate_file(directory):
     }
 
 
+def get_parameters(bench_id):
+    """
+    Get benchmarks parameters recorded for a given benchmark case.
+
+    :param bench_id: function name used for the benchmark case
+
+    :return: :class:`tuple` as ``(benchmark parameters, display name)``
+    """
+    params_dir = pathlib.Path("benchmarks_parameters", bench_id)
+    params = _parse_file_to_json(params_dir, "parameters.json")
+
+    display_name = params.pop("display_name")
+
+    return params, display_name
+
+
 def _parse_file_to_json(directory, filename):
     result_file = directory.joinpath(filename)
     return json.loads(result_file.read_text())
@@ -102,6 +136,9 @@ def dump_results(parsed_results, filename, input_args):
     :param filename: filename for dump file as :class:`pathlib.Path`
     :param input_args: CLI input arguments
     """
+    for point in parsed_results:
+        point["backend"] = input_args.backend
+
     if input_args.append_results:
         parsed_content = json.loads(filename.read_text())
         parsed_content["points"].extend(parsed_results)
@@ -149,7 +186,7 @@ if __name__ == "__main__":
 
     raw_results = pathlib.Path(args.results)
     print("Parsing benchmark results... ")
-    results = recursive_parse(raw_results, args.name_suffix)
+    results, failures = recursive_parse(raw_results, args.name_suffix)
     print("Parsing results done")
 
     output_file = pathlib.Path(args.output_file)
@@ -157,3 +194,10 @@ if __name__ == "__main__":
     dump_results(results, output_file, args)
 
     print("Done")
+
+    if failures:
+        print("\nParsing failed for some results")
+        print("-------------------------------")
+        for name, error in failures:
+            print(f"[{name}] {error}")
+        sys.exit(1)
