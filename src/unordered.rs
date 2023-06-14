@@ -511,6 +511,16 @@ pub struct Plan {
     n: usize,
 }
 
+impl core::fmt::Debug for Plan {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Plan")
+            .field("base_algo", &self.base_algo)
+            .field("base_n", &self.base_n)
+            .field("fft_size", &self.fft_size())
+            .finish()
+    }
+}
+
 /// Unordered monomial FFT plan.
 ///
 /// This type holds a forward FFT plan and twiddling factors for monomials of a specific size.
@@ -522,12 +532,10 @@ pub struct MonomialPlan {
     base_n: usize,
 }
 
-impl core::fmt::Debug for Plan {
+impl core::fmt::Debug for MonomialPlan {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Plan")
-            .field("base_algo", &self.base_algo)
-            .field("base_size", &self.base_n)
-            .field("fft_size", &self.fft_size())
+        f.debug_struct("MonomialPlan")
+            .field("base_n", &self.base_n)
             .finish()
     }
 }
