@@ -1,4 +1,4 @@
-use concrete_fft::{c64, unordered::MonomialPlan};
+use concrete_fft::c64;
 use core::ptr::NonNull;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dyn_stack::{PodStack, ReborrowMut, StackReq};
@@ -195,7 +195,6 @@ pub fn bench_ffts(c: &mut Criterion) {
         });
         write_to_json(&bench_id, "memcpy", n);
 
-        let monomial_plan = MonomialPlan::new(n, unordered.algo().1);
         let bench_id = format!("fwd-monomial-{n}");
         c.bench_function(&bench_id, |b| {
             let mut degree = 0;
@@ -204,7 +203,7 @@ pub fn bench_ffts(c: &mut Criterion) {
                 if degree == n {
                     degree = 0;
                 }
-                monomial_plan.fwd_monomial(degree, &mut dst);
+                unordered.fwd_monomial(degree, &mut dst);
             })
         });
         write_to_json(&bench_id, "fwd-monomial", n);
