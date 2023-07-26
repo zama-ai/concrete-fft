@@ -2,6 +2,9 @@
 name: Start all benchmarks
 
 on:
+  schedule:
+    # Job will be triggered each Friday at 10p.m.
+    - cron: '0 22 * * 5'
   push:
     branches:
       - 'main'
