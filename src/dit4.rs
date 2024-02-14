@@ -76,7 +76,6 @@ fn stockham_core_1x4<c64xN: Pod>(
 
         let (a, b, c, d) = simd.transpose(abcd0, abcd1, abcd2, abcd3);
 
-        let a = a;
         let b = simd.mul(w1, b);
         let c = simd.mul(w2, c);
         let d = simd.mul(w3, d);

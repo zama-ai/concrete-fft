@@ -77,7 +77,6 @@ fn inv_butterfly_x4<c64xN: Pod>(
     w2: c64xN,
     w3: c64xN,
 ) -> (c64xN, c64xN, c64xN, c64xN) {
-    let z0 = z0;
     let z1 = simd.mul(w1, z1);
     let z2 = simd.mul(w2, z2);
     let z3 = simd.mul(w3, z3);
@@ -172,7 +171,6 @@ fn inv_butterfly_x8<c64xN: Pod>(
     w6: c64xN,
     w7: c64xN,
 ) -> (c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN, c64xN) {
-    let z0 = z0;
     let z1 = simd.mul(w1, z1);
     let z2 = simd.mul(w2, z2);
     let z3 = simd.mul(w3, z3);

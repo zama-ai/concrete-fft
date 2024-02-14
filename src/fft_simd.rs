@@ -1,16 +1,18 @@
 use crate::c64;
 use core::{fmt::Debug, marker::PhantomData};
 
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub struct c64x1(c64);
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct c64x2(c64, c64);
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(feature = "nightly")]
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct c64x4(c64, c64, c64, c64);
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const __ASSERT_POD: () = {
     #[allow(unknown_lints)]
     #[allow(clippy::extra_unused_type_parameters)]
@@ -20,18 +22,25 @@ const __ASSERT_POD: () = {
     assert_pod_zeroable::<c64>();
 
     // no padding
-    assert!(core::mem::size_of::<c64x1>() == core::mem::size_of::<c64>() * 1);
     assert!(core::mem::size_of::<c64x2>() == core::mem::size_of::<c64>() * 2);
+    #[cfg(feature = "nightly")]
     assert!(core::mem::size_of::<c64x4>() == core::mem::size_of::<c64>() * 4);
 };
 
 // SAFETY: c64 is Zeroable
-unsafe impl bytemuck::Zeroable for c64x1 {}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe impl bytemuck::Zeroable for c64x2 {}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(feature = "nightly")]
 unsafe impl bytemuck::Zeroable for c64x4 {}
-// SAFETY: c64 is Pod, c64x1, c64x2, c64x4 are all repr(C) and have no padding
-unsafe impl bytemuck::Pod for c64x1 {}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+// SAFETY: c64 is Pod, c64x2, c64x4 are all repr(C) and have no padding
 unsafe impl bytemuck::Pod for c64x2 {}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(feature = "nightly")]
 unsafe impl bytemuck::Pod for c64x4 {}
 
 pub trait Pod: Copy + Debug + bytemuck::Pod {}
@@ -108,11 +117,6 @@ pub trait FftSimdExt<c64xN: Pod>: FftSimd<c64xN> {
         } else {
             self.conj(self.swap_re_im(xy))
         }
-    }
-
-    #[inline(always)]
-    fn mul_neg_j(self, fwd: bool, xy: c64xN) -> c64xN {
-        self.mul_j(!fwd, xy)
     }
 
     #[inline(always)]
