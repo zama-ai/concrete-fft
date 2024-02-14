@@ -237,6 +237,6 @@ mod dit16;
 pub mod ordered;
 pub mod unordered;
 
-#[cfg(any(feature = "fft128"))]
+#[cfg(feature = "fft128")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fft128")))]
 pub mod fft128;

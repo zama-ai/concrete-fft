@@ -12,14 +12,14 @@ use pulp::{as_arrays, as_arrays_mut, cast};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::fft128::f128_impl::x86::V3F128Ext;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use pulp::x86::{f64x4, V3};
+use pulp::{f64x4, x86::V3};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
 use crate::fft128::f128_impl::x86::V4F128Ext;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
-use pulp::x86::{f64x8, V4};
+use pulp::{f64x8, x86::V4};
 
 trait FftSimdF128: Copy {
     type Reg: Copy + core::fmt::Debug;
