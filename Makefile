@@ -1,7 +1,7 @@
 SHELL:=$(shell /usr/bin/env which bash)
 RS_CHECK_TOOLCHAIN:=$(shell cat toolchain.txt | tr -d '\n')
 CARGO_RS_CHECK_TOOLCHAIN:=+$(RS_CHECK_TOOLCHAIN)
-RS_BUILD_TOOLCHAIN:=nightly
+RS_BUILD_TOOLCHAIN:=stable
 CARGO_RS_BUILD_TOOLCHAIN:=+$(RS_BUILD_TOOLCHAIN)
 MIN_RUST_VERSION:=1.65
 AVX512_SUPPORT?=OFF
@@ -89,8 +89,8 @@ test_serde: install_rs_build_toolchain
 		--features=serde
 
 .PHONY: test_nightly
-test_nightly: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
+test_nightly: install_rs_check_toolchain
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) test --release \
 		--features=nightly,$(FFT128_FEATURE)
 
 .PHONY: test_no_std
@@ -100,8 +100,8 @@ test_no_std: install_rs_build_toolchain
 		--features=$(FFT128_FEATURE)
 
 .PHONY: test_no_std_nightly
-test_no_std_nightly: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
+test_no_std_nightly: install_rs_check_toolchain
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_CHECK_TOOLCHAIN) test --release \
 		--no-default-features \
 		--features=nightly,$(FFT128_FEATURE)
 
