@@ -621,9 +621,9 @@ impl f128 {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg_attr(docsrs, doc(cfg(any(target_arch = "x86", target_arch = "x86_64"))))]
 pub mod x86 {
-    use pulp::x86::{f64x4, V3};
+    use pulp::{f64x4, x86::V3};
     #[cfg(feature = "nightly")]
-    use pulp::x86::{f64x8, V4};
+    use pulp::{f64x8, x86::V4};
 
     #[inline(always)]
     pub(crate) fn quick_two_sum_f64x4(simd: V3, a: f64x4, b: f64x4) -> (f64x4, f64x4) {
