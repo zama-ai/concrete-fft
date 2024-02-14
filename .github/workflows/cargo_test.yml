@@ -20,6 +20,7 @@ jobs:
     strategy:
       matrix:
         runner_type: [ubuntu-latest, macos-latest, windows-latest, m1mac]
+      fail-fast: false
     steps:
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
 
