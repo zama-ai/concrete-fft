@@ -1,42 +1,51 @@
 # Run FFT benchmarks on an AWS instance and return parsed results to Slab CI bot.
 name: FFT benchmarks
 
-on:
-  workflow_dispatch:
-    inputs:
-      instance_id:
-        description: 'Instance ID'
-        type: string
-      instance_image_id:
-        description: 'Instance AMI ID'
-        type: string
-      instance_type:
-        description: 'Instance product type'
-        type: string
-      runner_name:
-        description: 'Action runner name'
-        type: string
-      request_id:
-        description: 'Slab request ID'
-        type: string
-
 env:
   CARGO_TERM_COLOR: always
+  ACTION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   RESULTS_FILENAME: parsed_benchmark_results_${{ github.sha }}.json
+  RUST_BACKTRACE: "full"
+  SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+  SLACK_ICON: https://pbs.twimg.com/profile_images/1274014582265298945/OjBKP9kn_400x400.png
+  SLACK_USERNAME: ${{ secrets.BOT_USERNAME }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+  schedule:
+    # Job will be triggered each Thursday at 11p.m.
+    - cron: '0 23 * * 4'
 
 jobs:
-  run-fft-benchmarks:
-    name: Execute FFT benchmarks in EC2
-    runs-on: ${{ github.event.inputs.runner_name }}
-    if: ${{ !cancelled() }}
+  setup-ec2:
+    name: Setup EC2 instance (fft-benchmarks)
+    runs-on: ubuntu-latest
+    outputs:
+      runner-name: ${{ steps.start-instance.outputs.label }}
+      instance-id: ${{ steps.start-instance.outputs.ec2-instance-id }}
     steps:
-      - name: Instance configuration used
-        run: |
-          echo "IDs: ${{ inputs.instance_id }}"
-          echo "AMI: ${{ inputs.instance_image_id }}"
-          echo "Type: ${{ inputs.instance_type }}"
-          echo "Request ID: ${{ inputs.request_id }}"
+      - name: Start instance
+        id: start-instance
+        uses: zama-ai/slab-github-runner@ab65ad70bb9f9e9251e4915ea5612bcad23cd9b1
+        with:
+          mode: start
+          github-token: ${{ secrets.SLAB_ACTION_TOKEN }}
+          slab-url: ${{ secrets.SLAB_BASE_URL }}
+          job-secret: ${{ secrets.JOB_SECRET }}
+          profile: bench
 
+  fft-benchmarks:
+    name: Execute FFT benchmarks in EC2
+    needs: setup-ec2
+    concurrency:
+      group: ${{ github.workflow }}_${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ${{ needs.setup-ec2.outputs.runner-name }}
+    steps:
       - name: Get benchmark date
         run: |
           echo "BENCH_DATE=$(date --iso-8601=seconds)" >> "${GITHUB_ENV}"
@@ -72,7 +81,7 @@ jobs:
           COMMIT_HASH="$(git describe --tags --dirty)"
           python3 ./ci/benchmark_parser.py target/criterion ${{ env.RESULTS_FILENAME }} \
           --database concrete_fft \
-          --hardware ${{ inputs.instance_type }} \
+          --hardware "hpc7a.96xlarge" \
           --project-version "${COMMIT_HASH}" \
           --branch ${{ github.ref_name }} \
           --commit-date "${COMMIT_DATE}" \
@@ -140,3 +149,36 @@ jobs:
           -H "X-Hub-Signature-256: sha256=${SIGNATURE}" \
           -d @${{ env.RESULTS_FILENAME }} \
           ${{ secrets.SLAB_URL }}
+
+      - name: Slack Notification
+        if: ${{ failure() }}
+        continue-on-error: true
+        uses: rtCamp/action-slack-notify@b24d75fe0e728a4bf9fc42ee217caa686d141ee8
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "concrete-fft benchmarks failed. (${{ env.ACTION_RUN_URL }})"
+
+  teardown-ec2:
+    name: Teardown EC2 instance (fft-benchmarks)
+    if: ${{ always() && needs.setup-ec2.result != 'skipped' }}
+    needs: [ setup-ec2, fft-benchmarks ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop instance
+        id: stop-instance
+        uses: zama-ai/slab-github-runner@ab65ad70bb9f9e9251e4915ea5612bcad23cd9b1
+        with:
+          mode: stop
+          github-token: ${{ secrets.SLAB_ACTION_TOKEN }}
+          slab-url: ${{ secrets.SLAB_BASE_URL }}
+          job-secret: ${{ secrets.JOB_SECRET }}
+          profile: bench
+          label: ${{ needs.setup-ec2.outputs.runner-name }}
+
+      - name: Slack Notification
+        if: ${{ failure() }}
+        continue-on-error: true
+        uses: rtCamp/action-slack-notify@b24d75fe0e728a4bf9fc42ee217caa686d141ee8
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "EC2 teardown (fft-benchmarks) failed. (${{ env.ACTION_RUN_URL }})"

@@ -1,9 +1,7 @@
 [profile.bench]
-region = "eu-west-3"
-image_id = "ami-04deffe45b5b236fd"
-instance_type = "m6i.metal"
+region = "eu-west-1"
+image_id = "ami-0e88d98b86aff13de"
+instance_type = "hpc7a.96xlarge"
 
-[command.bench]
-workflow = "benchmark.yml"
-profile = "bench"
-check_run_name = "FFT AWS Benchmarks"
+[command]
+# Slab needs at least an empty [command] as placeholder to parse this file.
