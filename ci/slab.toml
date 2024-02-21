@@ -1,6 +1,6 @@
 [profile.bench]
 region = "eu-west-1"
-image_id = "ami-0e88d98b86aff13de"
+image_id = "ami-0f96f17e9f652c6ab"
 instance_type = "hpc7a.96xlarge"
 
 [command]
