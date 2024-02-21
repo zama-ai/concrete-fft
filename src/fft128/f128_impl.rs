@@ -530,7 +530,7 @@ impl f128 {
         (sinc * self, cos)
     }
 
-    /// Takes and input in `(-1.0, 1.0)`, and returns the sine and cosine of `self`.
+    /// Takes an input in `(-1.0, 1.0)`, and returns the sine and cosine of `self`.
     pub fn sincospi(self) -> (Self, Self) {
         #[allow(clippy::manual_range_contains)]
         if self > 1.0 || self < -1.0 {
@@ -621,7 +621,7 @@ impl f128 {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg_attr(docsrs, doc(cfg(any(target_arch = "x86", target_arch = "x86_64"))))]
 pub mod x86 {
-    use pulp::{f64x4, x86::V3};
+    use pulp::{f64x4, x86::V3, Simd};
     #[cfg(feature = "nightly")]
     use pulp::{f64x8, x86::V4};
 
@@ -633,28 +633,19 @@ pub mod x86 {
 
     #[inline(always)]
     pub(crate) fn two_sum_f64x4(simd: V3, a: f64x4, b: f64x4) -> (f64x4, f64x4) {
-        let s = simd.add_f64x4(a, b);
-        let bb = simd.sub_f64x4(s, a);
-        (
-            s,
-            simd.add_f64x4(
-                simd.sub_f64x4(a, simd.sub_f64x4(s, bb)),
-                simd.sub_f64x4(b, bb),
-            ),
-        )
+        let sign_bit = simd.splat_f64x4(-0.0);
+        let cmp = simd.cmp_gt_f64x4(
+            simd.andnot_f64x4(sign_bit, a),
+            simd.andnot_f64x4(sign_bit, b),
+        );
+        let (a, b) = (simd.select_f64x4(cmp, a, b), simd.select_f64x4(cmp, b, a));
+
+        quick_two_sum_f64x4(simd, a, b)
     }
 
     #[inline(always)]
     pub(crate) fn two_diff_f64x4(simd: V3, a: f64x4, b: f64x4) -> (f64x4, f64x4) {
-        let s = simd.sub_f64x4(a, b);
-        let bb = simd.sub_f64x4(s, a);
-        (
-            s,
-            simd.sub_f64x4(
-                simd.sub_f64x4(a, simd.sub_f64x4(s, bb)),
-                simd.add_f64x4(b, bb),
-            ),
-        )
+        two_sum_f64x4(simd, a, simd.f64s_neg(b))
     }
 
     #[inline(always)]
@@ -670,32 +661,23 @@ pub mod x86 {
         (s, simd.sub_f64x8(b, simd.sub_f64x8(s, a)))
     }
 
-    #[cfg(feature = "nightly")]
     #[inline(always)]
+    #[cfg(feature = "nightly")]
     pub(crate) fn two_sum_f64x8(simd: V4, a: f64x8, b: f64x8) -> (f64x8, f64x8) {
-        let s = simd.add_f64x8(a, b);
-        let bb = simd.sub_f64x8(s, a);
-        (
-            s,
-            simd.add_f64x8(
-                simd.sub_f64x8(a, simd.sub_f64x8(s, bb)),
-                simd.sub_f64x8(b, bb),
-            ),
-        )
+        let sign_bit = simd.splat_f64x8(-0.0);
+        let cmp = simd.cmp_gt_f64x8(
+            simd.andnot_f64x8(sign_bit, a),
+            simd.andnot_f64x8(sign_bit, b),
+        );
+        let (a, b) = (simd.select_f64x8(cmp, a, b), simd.select_f64x8(cmp, b, a));
+
+        quick_two_sum_f64x8(simd, a, b)
     }
 
-    #[cfg(feature = "nightly")]
     #[inline(always)]
+    #[cfg(feature = "nightly")]
     pub(crate) fn two_diff_f64x8(simd: V4, a: f64x8, b: f64x8) -> (f64x8, f64x8) {
-        let s = simd.sub_f64x8(a, b);
-        let bb = simd.sub_f64x8(s, a);
-        (
-            s,
-            simd.sub_f64x8(
-                simd.sub_f64x8(a, simd.sub_f64x8(s, bb)),
-                simd.add_f64x8(b, bb),
-            ),
-        )
+        two_sum_f64x8(simd, a, simd.f64s_neg(b))
     }
 
     #[cfg(feature = "nightly")]
