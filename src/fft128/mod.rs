@@ -16,7 +16,7 @@ use pulp::{f64x4, x86::V3};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
-use crate::fft128::f128_impl::x86::V4F128Ext;
+use crate::fft128::f128_impl::x86::{f64x16, V4F128Ext};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
 use pulp::{f64x8, x86::V4};
@@ -243,6 +243,45 @@ impl FftSimdF128 for V4 {
     }
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(feature = "nightly")]
+#[derive(Copy, Clone, Debug)]
+pub struct V4x2(pub V4);
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(feature = "nightly")]
+impl FftSimdF128 for V4x2 {
+    type Reg = f64x16;
+
+    #[inline(always)]
+    fn splat(self, value: f64) -> Self::Reg {
+        cast(self.0.splat_f64x16(value))
+    }
+
+    #[inline(always)]
+    fn add(self, a: (Self::Reg, Self::Reg), b: (Self::Reg, Self::Reg)) -> (Self::Reg, Self::Reg) {
+        let result = self
+            .0
+            .add_estimate_f128x16(cast(a.0), cast(a.1), cast(b.0), cast(b.1));
+        (cast(result.0), cast(result.1))
+    }
+
+    #[inline(always)]
+    fn sub(self, a: (Self::Reg, Self::Reg), b: (Self::Reg, Self::Reg)) -> (Self::Reg, Self::Reg) {
+        let result = self
+            .0
+            .sub_estimate_f128x16(cast(a.0), cast(a.1), cast(b.0), cast(b.1));
+        (cast(result.0), cast(result.1))
+    }
+
+    #[inline(always)]
+    fn mul(self, a: (Self::Reg, Self::Reg), b: (Self::Reg, Self::Reg)) -> (Self::Reg, Self::Reg) {
+        let result = self
+            .0
+            .mul_f128x16(cast(a.0), cast(a.1), cast(b.0), cast(b.1));
+        (cast(result.0), cast(result.1))
+    }
+}
 trait FftSimdF128Ext: FftSimdF128 {
     #[inline(always)]
     fn cplx_add(
@@ -404,7 +443,7 @@ pub fn negacyclic_fwd_fft_avxfma(
                 twid_im1,
             } = self;
             let n = data_re0.len();
-            assert!(n >= 16);
+            assert!(n >= 32);
             {
                 let mut t = n;
                 let mut m = 1;
@@ -666,12 +705,12 @@ pub fn negacyclic_fwd_fft_avx512(
             } = self;
 
             let n = data_re0.len();
-            assert!(n >= 16);
+            assert!(n >= 32);
             {
                 let mut t = n;
                 let mut m = 1;
 
-                while m < n / 8 {
+                while m < n / 16 {
                     t /= 2;
 
                     let twid_re0 = &twid_re0[m..];
@@ -692,6 +731,8 @@ pub fn negacyclic_fwd_fft_avx512(
                     for (data_re0, data_re1, data_im0, data_im1, w1_re0, w1_re1, w1_im0, w1_im1) in
                         iter
                     {
+                        let simd = V4x2(simd);
+
                         let w1_re = (*w1_re0, *w1_re1);
                         let w1_im = (*w1_im0, *w1_im1);
 
@@ -703,14 +744,14 @@ pub fn negacyclic_fwd_fft_avx512(
                         let (z0_im0, z1_im0) = data_im0.split_at_mut(t);
                         let (z0_im1, z1_im1) = data_im1.split_at_mut(t);
 
-                        let z0_re0 = as_arrays_mut::<8, _>(z0_re0).0;
-                        let z0_re1 = as_arrays_mut::<8, _>(z0_re1).0;
-                        let z0_im0 = as_arrays_mut::<8, _>(z0_im0).0;
-                        let z0_im1 = as_arrays_mut::<8, _>(z0_im1).0;
-                        let z1_re0 = as_arrays_mut::<8, _>(z1_re0).0;
-                        let z1_re1 = as_arrays_mut::<8, _>(z1_re1).0;
-                        let z1_im0 = as_arrays_mut::<8, _>(z1_im0).0;
-                        let z1_im1 = as_arrays_mut::<8, _>(z1_im1).0;
+                        let z0_re0 = as_arrays_mut::<16, _>(z0_re0).0;
+                        let z0_re1 = as_arrays_mut::<16, _>(z0_re1).0;
+                        let z0_im0 = as_arrays_mut::<16, _>(z0_im0).0;
+                        let z0_im1 = as_arrays_mut::<16, _>(z0_im1).0;
+                        let z1_re0 = as_arrays_mut::<16, _>(z1_re0).0;
+                        let z1_re1 = as_arrays_mut::<16, _>(z1_re1).0;
+                        let z1_im0 = as_arrays_mut::<16, _>(z1_im0).0;
+                        let z1_im1 = as_arrays_mut::<16, _>(z1_im1).0;
 
                         let iter =
                             izip!(z0_re0, z0_re1, z0_im0, z0_im1, z1_re0, z1_re1, z1_im0, z1_im1);
@@ -725,14 +766,14 @@ pub fn negacyclic_fwd_fft_avx512(
                             z1_im1_,
                         ) in iter
                         {
-                            let mut z0_re0 = cast(*z0_re0_);
-                            let mut z0_re1 = cast(*z0_re1_);
-                            let mut z0_im0 = cast(*z0_im0_);
-                            let mut z0_im1 = cast(*z0_im1_);
-                            let mut z1_re0 = cast(*z1_re0_);
-                            let mut z1_re1 = cast(*z1_re1_);
-                            let mut z1_im0 = cast(*z1_im0_);
-                            let mut z1_im1 = cast(*z1_im1_);
+                            let mut z0_re0: f64x16 = cast(*z0_re0_);
+                            let mut z0_re1: f64x16 = cast(*z0_re1_);
+                            let mut z0_im0: f64x16 = cast(*z0_im0_);
+                            let mut z0_im1: f64x16 = cast(*z0_im1_);
+                            let mut z1_re0: f64x16 = cast(*z1_re0_);
+                            let mut z1_re1: f64x16 = cast(*z1_re1_);
+                            let mut z1_im0: f64x16 = cast(*z1_im0_);
+                            let mut z1_im1: f64x16 = cast(*z1_im1_);
 
                             let (z0_re, z0_im) = ((z0_re0, z0_re1), (z0_im0, z0_im1));
                             let (z1_re, z1_im) = ((z1_re0, z1_re1), (z1_im0, z1_im1));
@@ -755,6 +796,82 @@ pub fn negacyclic_fwd_fft_avx512(
                     }
 
                     m *= 2;
+                }
+            }
+
+            {
+                let m = n / 16;
+                let t = 8;
+
+                let twid_re0 = &twid_re0[m..];
+                let twid_re1 = &twid_re1[m..];
+                let twid_im0 = &twid_im0[m..];
+                let twid_im1 = &twid_im1[m..];
+
+                let iter = izip!(
+                    data_re0.chunks_mut(2 * t),
+                    data_re1.chunks_mut(2 * t),
+                    data_im0.chunks_mut(2 * t),
+                    data_im1.chunks_mut(2 * t),
+                    twid_re0,
+                    twid_re1,
+                    twid_im0,
+                    twid_im1,
+                );
+                for (data_re0, data_re1, data_im0, data_im1, w1_re0, w1_re1, w1_im0, w1_im1) in iter
+                {
+                    let w1_re = (*w1_re0, *w1_re1);
+                    let w1_im = (*w1_im0, *w1_im1);
+
+                    let w1_re = (simd.splat(w1_re.0), simd.splat(w1_re.1));
+                    let w1_im = (simd.splat(w1_im.0), simd.splat(w1_im.1));
+
+                    let (z0_re0, z1_re0) = data_re0.split_at_mut(t);
+                    let (z0_re1, z1_re1) = data_re1.split_at_mut(t);
+                    let (z0_im0, z1_im0) = data_im0.split_at_mut(t);
+                    let (z0_im1, z1_im1) = data_im1.split_at_mut(t);
+
+                    let z0_re0 = as_arrays_mut::<8, _>(z0_re0).0;
+                    let z0_re1 = as_arrays_mut::<8, _>(z0_re1).0;
+                    let z0_im0 = as_arrays_mut::<8, _>(z0_im0).0;
+                    let z0_im1 = as_arrays_mut::<8, _>(z0_im1).0;
+                    let z1_re0 = as_arrays_mut::<8, _>(z1_re0).0;
+                    let z1_re1 = as_arrays_mut::<8, _>(z1_re1).0;
+                    let z1_im0 = as_arrays_mut::<8, _>(z1_im0).0;
+                    let z1_im1 = as_arrays_mut::<8, _>(z1_im1).0;
+
+                    let iter =
+                        izip!(z0_re0, z0_re1, z0_im0, z0_im1, z1_re0, z1_re1, z1_im0, z1_im1);
+                    for (z0_re0_, z0_re1_, z0_im0_, z0_im1_, z1_re0_, z1_re1_, z1_im0_, z1_im1_) in
+                        iter
+                    {
+                        let mut z0_re0 = cast(*z0_re0_);
+                        let mut z0_re1 = cast(*z0_re1_);
+                        let mut z0_im0 = cast(*z0_im0_);
+                        let mut z0_im1 = cast(*z0_im1_);
+                        let mut z1_re0 = cast(*z1_re0_);
+                        let mut z1_re1 = cast(*z1_re1_);
+                        let mut z1_im0 = cast(*z1_im0_);
+                        let mut z1_im1 = cast(*z1_im1_);
+
+                        let (z0_re, z0_im) = ((z0_re0, z0_re1), (z0_im0, z0_im1));
+                        let (z1_re, z1_im) = ((z1_re0, z1_re1), (z1_im0, z1_im1));
+                        let (z1w_re, z1w_im) = simd.cplx_mul(z1_re, z1_im, w1_re, w1_im);
+
+                        ((z0_re0, z0_re1), (z0_im0, z0_im1)) =
+                            simd.cplx_add(z0_re, z0_im, z1w_re, z1w_im);
+                        ((z1_re0, z1_re1), (z1_im0, z1_im1)) =
+                            simd.cplx_sub(z0_re, z0_im, z1w_re, z1w_im);
+
+                        *z0_re0_ = cast(z0_re0);
+                        *z0_re1_ = cast(z0_re1);
+                        *z0_im0_ = cast(z0_im0);
+                        *z0_im1_ = cast(z0_im1);
+                        *z1_re0_ = cast(z1_re0);
+                        *z1_re1_ = cast(z1_re1);
+                        *z1_im0_ = cast(z1_im0);
+                        *z1_im1_ = cast(z1_im1);
+                    }
                 }
             }
 
@@ -1079,7 +1196,7 @@ pub fn negacyclic_inv_fft_avxfma(
                 twid_im1,
             } = self;
             let n = data_re0.len();
-            assert!(n >= 16);
+            assert!(n >= 32);
             let mut t = 1;
             let mut m = n;
 
@@ -1330,7 +1447,7 @@ pub fn negacyclic_inv_fft_avx512(
             } = self;
 
             let n = data_re0.len();
-            assert!(n >= 16);
+            assert!(n >= 32);
             let mut t = 1;
             let mut m = n;
 
@@ -1505,7 +1622,7 @@ pub fn negacyclic_inv_fft_avx512(
                 t *= 2;
             }
 
-            while m > 1 {
+            {
                 m /= 2;
 
                 let twid_re0 = &twid_re0[m..];
@@ -1544,6 +1661,83 @@ pub fn negacyclic_inv_fft_avx512(
                     let z1_re1 = as_arrays_mut::<8, _>(z1_re1).0;
                     let z1_im0 = as_arrays_mut::<8, _>(z1_im0).0;
                     let z1_im1 = as_arrays_mut::<8, _>(z1_im1).0;
+
+                    let iter =
+                        izip!(z0_re0, z0_re1, z0_im0, z0_im1, z1_re0, z1_re1, z1_im0, z1_im1);
+                    for (z0_re0_, z0_re1_, z0_im0_, z0_im1_, z1_re0_, z1_re1_, z1_im0_, z1_im1_) in
+                        iter
+                    {
+                        let mut z0_re0 = cast(*z0_re0_);
+                        let mut z0_re1 = cast(*z0_re1_);
+                        let mut z0_im0 = cast(*z0_im0_);
+                        let mut z0_im1 = cast(*z0_im1_);
+                        let mut z1_re0 = cast(*z1_re0_);
+                        let mut z1_re1 = cast(*z1_re1_);
+                        let mut z1_im0 = cast(*z1_im0_);
+                        let mut z1_im1 = cast(*z1_im1_);
+
+                        let (z0_re, z0_im) = ((z0_re0, z0_re1), (z0_im0, z0_im1));
+                        let (z1_re, z1_im) = ((z1_re0, z1_re1), (z1_im0, z1_im1));
+                        let (z0mz1_re, z0mz1_im) = simd.cplx_sub(z0_re, z0_im, z1_re, z1_im);
+
+                        ((z0_re0, z0_re1), (z0_im0, z0_im1)) =
+                            simd.cplx_add(z0_re, z0_im, z1_re, z1_im);
+                        ((z1_re0, z1_re1), (z1_im0, z1_im1)) =
+                            simd.cplx_mul_conj(z0mz1_re, z0mz1_im, w1_re, w1_im);
+
+                        *z0_re0_ = cast(z0_re0);
+                        *z0_re1_ = cast(z0_re1);
+                        *z0_im0_ = cast(z0_im0);
+                        *z0_im1_ = cast(z0_im1);
+                        *z1_re0_ = cast(z1_re0);
+                        *z1_re1_ = cast(z1_re1);
+                        *z1_im0_ = cast(z1_im0);
+                        *z1_im1_ = cast(z1_im1);
+                    }
+                }
+                t *= 2;
+            }
+
+            while m > 1 {
+                m /= 2;
+
+                let twid_re0 = &twid_re0[m..];
+                let twid_re1 = &twid_re1[m..];
+                let twid_im0 = &twid_im0[m..];
+                let twid_im1 = &twid_im1[m..];
+
+                let iter = izip!(
+                    data_re0.chunks_mut(2 * t),
+                    data_re1.chunks_mut(2 * t),
+                    data_im0.chunks_mut(2 * t),
+                    data_im1.chunks_mut(2 * t),
+                    twid_re0,
+                    twid_re1,
+                    twid_im0,
+                    twid_im1,
+                );
+                for (data_re0, data_re1, data_im0, data_im1, w1_re0, w1_re1, w1_im0, w1_im1) in iter
+                {
+                    let simd = V4x2(simd);
+                    let w1_re = (*w1_re0, *w1_re1);
+                    let w1_im = (*w1_im0, *w1_im1);
+
+                    let w1_re = (simd.splat(w1_re.0), simd.splat(w1_re.1));
+                    let w1_im = (simd.splat(w1_im.0), simd.splat(w1_im.1));
+
+                    let (z0_re0, z1_re0) = data_re0.split_at_mut(t);
+                    let (z0_re1, z1_re1) = data_re1.split_at_mut(t);
+                    let (z0_im0, z1_im0) = data_im0.split_at_mut(t);
+                    let (z0_im1, z1_im1) = data_im1.split_at_mut(t);
+
+                    let z0_re0 = as_arrays_mut::<16, _>(z0_re0).0;
+                    let z0_re1 = as_arrays_mut::<16, _>(z0_re1).0;
+                    let z0_im0 = as_arrays_mut::<16, _>(z0_im0).0;
+                    let z0_im1 = as_arrays_mut::<16, _>(z0_im1).0;
+                    let z1_re0 = as_arrays_mut::<16, _>(z1_re0).0;
+                    let z1_re1 = as_arrays_mut::<16, _>(z1_re1).0;
+                    let z1_im0 = as_arrays_mut::<16, _>(z1_im0).0;
+                    let z1_im1 = as_arrays_mut::<16, _>(z1_im1).0;
 
                     let iter =
                         izip!(z0_re0, z0_re1, z0_im0, z0_im1, z1_re0, z1_re1, z1_im0, z1_im1);
@@ -1669,7 +1863,7 @@ impl Plan {
     #[track_caller]
     pub fn new(n: usize) -> Self {
         assert!(n.is_power_of_two());
-        assert!(n >= 16);
+        assert!(n >= 32);
 
         let mut twid_re0 = avec![0.0f64; n].into_boxed_slice();
         let mut twid_re1 = avec![0.0f64; n].into_boxed_slice();
@@ -1776,7 +1970,7 @@ mod tests {
 
     #[test]
     fn test_wrapper() {
-        for n in [32, 64, 128, 256, 512, 1024, 2048] {
+        for n in [64, 128, 256, 512, 1024, 2048] {
             let mut lhs = vec![f128(0.0, 0.0); n];
             let mut rhs = vec![f128(0.0, 0.0); n];
             let mut result = vec![f128(0.0, 0.0); n];
@@ -1872,7 +2066,7 @@ mod tests {
 
     #[test]
     fn test_product() {
-        for n in [32, 64, 128, 256, 512, 1024, 2048] {
+        for n in [64, 128, 256, 512, 1024, 2048] {
             let mut lhs = vec![f128(0.0, 0.0); n];
             let mut rhs = vec![f128(0.0, 0.0); n];
             let mut result = vec![f128(0.0, 0.0); n];
@@ -1987,7 +2181,7 @@ mod tests {
     #[test]
     fn test_product_avxfma() {
         if let Some(simd) = V3::try_new() {
-            for n in [32, 64, 128, 256, 512, 1024, 2048] {
+            for n in [64, 128, 256, 512, 1024, 2048] {
                 let mut lhs = vec![f128(0.0, 0.0); n];
                 let mut rhs = vec![f128(0.0, 0.0); n];
                 let mut result = vec![f128(0.0, 0.0); n];
@@ -2112,7 +2306,7 @@ mod tests {
     #[test]
     fn test_product_avx512() {
         if let Some(simd) = V4::try_new() {
-            for n in [32, 64, 128, 256, 512, 1024, 2048] {
+            for n in [64, 128, 256, 512, 1024, 2048] {
                 let mut lhs = vec![f128(0.0, 0.0); n];
                 let mut rhs = vec![f128(0.0, 0.0); n];
                 let mut result = vec![f128(0.0, 0.0); n];
