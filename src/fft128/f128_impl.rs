@@ -836,7 +836,7 @@ pub mod x86 {
         #[inline(always)]
         fn mul_f128x4(self, a0: f64x4, a1: f64x4, b0: f64x4, b1: f64x4) -> (f64x4, f64x4) {
             let (p1, p2) = two_prod_f64x4(self, a0, b0);
-            let p2 = self.add_f64x4(p2, self.mul_add_f64x4(a0, b1, self.mul_f64x4(a1, b0)));
+            let p2 = self.mul_add_f64x4(a0, b1, self.mul_add_f64x4(a1, b0, p2));
             quick_two_sum_f64x4(self, p1, p2)
         }
     }
@@ -885,7 +885,7 @@ pub mod x86 {
         #[inline(always)]
         fn mul_f128x8(self, a0: f64x8, a1: f64x8, b0: f64x8, b1: f64x8) -> (f64x8, f64x8) {
             let (p1, p2) = two_prod_f64x8(self, a0, b0);
-            let p2 = self.add_f64x8(p2, self.mul_add_f64x8(a0, b1, self.mul_f64x8(a1, b0)));
+            let p2 = self.mul_add_f64x8(a0, b1, self.mul_add_f64x8(a1, b0, p2));
             quick_two_sum_f64x8(self, p1, p2)
         }
 
@@ -943,7 +943,7 @@ pub mod x86 {
         #[inline(always)]
         fn mul_f128x16(self, a0: f64x16, a1: f64x16, b0: f64x16, b1: f64x16) -> (f64x16, f64x16) {
             let (p1, p2) = two_prod_f64x16(self, a0, b0);
-            let p2 = self.add_f64x16(p2, self.mul_add_f64x16(a0, b1, self.mul_f64x16(a1, b0)));
+            let p2 = self.mul_add_f64x16(a0, b1, self.mul_add_f64x16(a1, b0, p2));
             quick_two_sum_f64x16(self, p1, p2)
         }
 
