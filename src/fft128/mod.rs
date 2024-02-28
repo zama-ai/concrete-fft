@@ -1,4 +1,4 @@
-mod f128_impl;
+pub mod f128_ops;
 
 /// 128-bit floating point number.
 #[allow(non_camel_case_types)]
@@ -10,13 +10,13 @@ use aligned_vec::{avec, ABox};
 use pulp::{as_arrays, as_arrays_mut, cast};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use crate::fft128::f128_impl::x86::V3F128Ext;
+use crate::fft128::f128_ops::x86::V3F128Ext;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use pulp::{f64x4, x86::V3};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
-use crate::fft128::f128_impl::x86::{f64x16, V4F128Ext};
+use crate::fft128::f128_ops::x86::{f64x16, V4F128Ext};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(feature = "nightly")]
 use pulp::{f64x8, x86::V4};
