@@ -234,6 +234,8 @@ mod dit8;
 mod dif16;
 mod dit16;
 
+mod time;
+
 pub mod ordered;
 pub mod unordered;
 

@@ -58,7 +58,12 @@ pub enum Method {
     Measure(Duration),
 }
 
+// Inlining this function will cause a compiler error when compiling for target wasm32-unknown-unknown.
+// The compiler thinks that the variable `n_runs` is a constant. It tries to optimize the variable, removing it in the process.
+// When the compiler remove the n_runs variable, it results in an infinite loop.
+// Therefore, it is a compiler bug, not the code.
 #[cfg(feature = "std")]
+#[inline(never)]
 fn measure_n_runs(
     n_runs: u128,
     algo: FftAlgo,
@@ -71,7 +76,7 @@ fn measure_n_runs(
     let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
     let [fwd, _] = get_fn_ptr(algo, n);
 
-    use std::time::Instant;
+    use crate::time::Instant;
     let now = Instant::now();
 
     for _ in 0..n_runs {
