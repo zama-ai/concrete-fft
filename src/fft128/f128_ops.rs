@@ -1021,7 +1021,7 @@ pub mod x86 {
     }
 }
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, not(target_os = "windows"), not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use more_asserts::assert_le;
