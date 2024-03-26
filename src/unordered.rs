@@ -610,7 +610,7 @@ fn measure_fastest(
 
             let n_runs = n_runs.ceil() as u32;
 
-            use std::time::Instant;
+            use crate::time::Instant;
             let now = Instant::now();
             for _ in 0..n_runs {
                 fwd_depth(
@@ -1057,7 +1057,7 @@ fn bit_rev_twice_inv(nbits: u32, base_nbits: u32, i: usize) -> usize {
     bit_rev(nbits, i_rev)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use alloc::vec;
@@ -9391,7 +9391,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "serde"))]
+#[cfg(all(test, feature = "serde", not(target_arch = "wasm32")))]
 mod tests_serde {
     use super::*;
     use alloc::{vec, vec::Vec};

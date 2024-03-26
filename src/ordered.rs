@@ -59,6 +59,7 @@ pub enum Method {
 }
 
 #[cfg(feature = "std")]
+#[cfg_attr(target_family = "wasm", inline(never))]
 fn measure_n_runs(
     n_runs: u128,
     algo: FftAlgo,
@@ -71,7 +72,7 @@ fn measure_n_runs(
     let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
     let [fwd, _] = get_fn_ptr(algo, n);
 
-    use std::time::Instant;
+    use crate::time::Instant;
     let now = Instant::now();
 
     for _ in 0..n_runs {
@@ -151,7 +152,7 @@ pub(crate) fn measure_fastest(
                     stack.rb_mut(),
                 );
 
-                if duration < MIN_DURATION {
+                if duration <= MIN_DURATION {
                     n_runs *= 2;
                 } else {
                     break (n_runs, duration_div_f64(duration, n_runs as f64));
@@ -378,7 +379,7 @@ impl Plan {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use crate::{
         c64, dif16, dif2, dif4, dif8, dit16, dit2, dit4, dit8,
