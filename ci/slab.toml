@@ -1,7 +1,4 @@
-[profile.bench]
+[backend.aws.bench]
 region = "eu-west-1"
 image_id = "ami-0f96f17e9f652c6ab"
 instance_type = "hpc7a.96xlarge"
-
-[command]
-# Slab needs at least an empty [command] as placeholder to parse this file.
