@@ -26,16 +26,24 @@ std = ["pulp/std"]
 serde = ["dep:serde", "num-complex/serde"]
 
 [dev-dependencies]
-criterion = "0.4"
 rustfft = "6.0"
-fftw-sys = { version = "0.6", default-features = false, features = ["system"] }
-rand = "0.8"
 bincode = "1.3"
 more-asserts = "0.3.1"
 serde_json = "1.0.96"
+wasm-bindgen-test = "0.3"
+wasm-bindgen = "0.2.92"
 
-[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.69"
+
+[target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dev-dependencies]
 rug = "1.19.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+fftw-sys = { version = "0.6", default-features = false, features = ["system"] }
+rand = "0.8"
+criterion = "0.4"
+
 
 [[bench]]
 name = "fft"
