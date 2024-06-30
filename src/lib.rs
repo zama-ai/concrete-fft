@@ -240,3 +240,88 @@ pub mod unordered;
 #[cfg(feature = "fft128")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fft128")))]
 pub mod fft128;
+
+use std::cell::LazyCell;
+use std::time::Duration;
+thread_local! {
+static plan_512 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(512, unordered::Method::Measure(Duration::from_millis(10)))});
+static plan_1024 : LazyCell<unordered::Plan> =  LazyCell::new(||{unordered::Plan::new(1024, unordered::Method::Measure(Duration::from_millis(10)))});
+static plan_2048 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(2048, unordered::Method::Measure(Duration::from_millis(10)))});
+}
+
+#[cxx::bridge]
+mod ffi {
+    #[namespace = "cocnrete_fft"]
+    extern "Rust" {
+        fn fwd(data: &mut [f64]);
+        fn inv(data: &mut [f64]);
+    }
+}
+
+use dyn_stack::{PodStack, GlobalPodBuffer, ReborrowMut};
+
+fn fwd(data: &mut [f64]) {
+    // https://stackoverflow.com/questions/54185667/how-to-safely-reinterpret-vecf64-as-vecnum-complexcomplexf64-with-half-t
+    let ptr = data.as_ptr() as *mut num_complex::Complex<f64>;
+    let len = data.len();
+
+    assert!(len % 2 == 0);
+    let buffer: &mut [c64];
+    unsafe{
+        buffer = std::slice::from_raw_parts_mut(ptr, len / 2);
+    }
+    if data.len() == 512 {
+        plan_512.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.fwd(buffer, stack.rb_mut());
+        });
+    }
+    else if data.len() == 1024 {
+        plan_1024.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.fwd(buffer, stack.rb_mut());
+        });
+    }
+    else if data.len() == 2048 {
+        plan_2048.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.fwd(buffer, stack.rb_mut());
+        });
+    }
+}
+
+fn inv(data: &mut [f64]) {
+    // https://stackoverflow.com/questions/54185667/how-to-safely-reinterpret-vecf64-as-vecnum-complexcomplexf64-with-half-t
+    let ptr = data.as_ptr() as *mut num_complex::Complex<f64>;
+    let len = data.len();
+
+    assert!(len % 2 == 0);
+    let buffer: &mut [c64];
+    unsafe{
+        buffer = std::slice::from_raw_parts_mut(ptr, len / 2);
+    }
+    if data.len() == 512 {
+        plan_512.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.inv(buffer, stack.rb_mut());
+        });
+    }
+    else if data.len() == 1024 {
+        plan_1024.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.inv(buffer, stack.rb_mut());
+        });
+    }
+    else if data.len() == 2048 {
+        plan_2048.with(|plan|{
+            let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
+            let mut stack = PodStack::new(&mut scratch_memory);
+            plan.inv(buffer, stack.rb_mut());
+        });
+    }
+}
