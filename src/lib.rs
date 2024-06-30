@@ -244,9 +244,9 @@ pub mod fft128;
 use std::cell::LazyCell;
 use std::time::Duration;
 thread_local! {
-static plan_512 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(512, unordered::Method::Measure(Duration::from_millis(10)))});
-static plan_1024 : LazyCell<unordered::Plan> =  LazyCell::new(||{unordered::Plan::new(1024, unordered::Method::Measure(Duration::from_millis(10)))});
-static plan_2048 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(2048, unordered::Method::Measure(Duration::from_millis(10)))});
+static PLAN_512 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(512, unordered::Method::Measure(Duration::from_millis(10)))});
+static PLAN_1024 : LazyCell<unordered::Plan> =  LazyCell::new(||{unordered::Plan::new(1024, unordered::Method::Measure(Duration::from_millis(10)))});
+static PLAN_2048 : LazyCell<unordered::Plan> = LazyCell::new(||{unordered::Plan::new(2048, unordered::Method::Measure(Duration::from_millis(10)))});
 }
 
 #[cxx::bridge]
@@ -271,21 +271,21 @@ fn fwd(data: &mut [f64]) {
         buffer = std::slice::from_raw_parts_mut(ptr, len / 2);
     }
     if data.len() == 512 {
-        plan_512.with(|plan|{
+        PLAN_512.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.fwd(buffer, stack.rb_mut());
         });
     }
     else if data.len() == 1024 {
-        plan_1024.with(|plan|{
+        PLAN_1024.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.fwd(buffer, stack.rb_mut());
         });
     }
     else if data.len() == 2048 {
-        plan_2048.with(|plan|{
+        PLAN_2048.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.fwd(buffer, stack.rb_mut());
@@ -304,21 +304,21 @@ fn inv(data: &mut [f64]) {
         buffer = std::slice::from_raw_parts_mut(ptr, len / 2);
     }
     if data.len() == 512 {
-        plan_512.with(|plan|{
+        PLAN_512.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.inv(buffer, stack.rb_mut());
         });
     }
     else if data.len() == 1024 {
-        plan_1024.with(|plan|{
+        PLAN_1024.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.inv(buffer, stack.rb_mut());
         });
     }
     else if data.len() == 2048 {
-        plan_2048.with(|plan|{
+        PLAN_2048.with(|plan|{
             let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
             let mut stack = PodStack::new(&mut scratch_memory);
             plan.inv(buffer, stack.rb_mut());
