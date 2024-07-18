@@ -68,14 +68,14 @@ fn measure_n_runs(
     stack: PodStack,
 ) -> Duration {
     let n = buf.len();
-    let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
+    let (scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
     let [fwd, _] = get_fn_ptr(algo, n);
 
     use std::time::Instant;
     let now = Instant::now();
 
     for _ in 0..n_runs {
-        fwd(buf, &mut scratch, twiddles, twiddles_init);
+        fwd(buf, scratch, twiddles, twiddles_init);
     }
 
     now.elapsed()
@@ -112,7 +112,7 @@ pub(crate) fn measure_fastest(
     let (twiddles, stack) = stack.make_aligned_with::<c64, _>(2 * n, align, f);
     let twiddles_init = &twiddles[..n];
     let twiddles = &twiddles[n..];
-    let (mut buf, mut stack) = stack.make_aligned_with::<c64, _>(n, align, f);
+    let (buf, mut stack) = stack.make_aligned_with::<c64, _>(n, align, f);
 
     {
         // initialize scratch to load it in the cpu cache
@@ -142,14 +142,8 @@ pub(crate) fn measure_fastest(
             let mut n_runs: u128 = 1;
 
             loop {
-                let duration = measure_n_runs(
-                    n_runs,
-                    algo,
-                    &mut buf,
-                    twiddles_init,
-                    twiddles,
-                    stack.rb_mut(),
-                );
+                let duration =
+                    measure_n_runs(n_runs, algo, buf, twiddles_init, twiddles, stack.rb_mut());
 
                 if duration < MIN_DURATION {
                     n_runs *= 2;
@@ -164,14 +158,8 @@ pub(crate) fn measure_fastest(
         *avg = if n_runs <= init_n_runs {
             approx_duration
         } else {
-            let duration = measure_n_runs(
-                n_runs,
-                algo,
-                &mut buf,
-                twiddles_init,
-                twiddles,
-                stack.rb_mut(),
-            );
+            let duration =
+                measure_n_runs(n_runs, algo, buf, twiddles_init, twiddles, stack.rb_mut());
             duration_div_f64(duration, n_runs as f64)
         };
     }
@@ -346,9 +334,9 @@ impl Plan {
     /// ```
     pub fn fwd(&self, buf: &mut [c64], stack: PodStack) {
         let n = self.fft_size();
-        let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
+        let (scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
         let (w_init, w) = split_2(&self.twiddles);
-        (self.fwd)(buf, &mut scratch, w_init, w)
+        (self.fwd)(buf, scratch, w_init, w)
     }
 
     /// Performs an inverse FFT in place, using the provided stack as scratch space.
@@ -372,9 +360,9 @@ impl Plan {
     /// ```
     pub fn inv(&self, buf: &mut [c64], stack: PodStack) {
         let n = self.fft_size();
-        let (mut scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
+        let (scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
         let (w_init, w) = split_2(&self.twiddles_inv);
-        (self.inv)(buf, &mut scratch, w_init, w)
+        (self.inv)(buf, scratch, w_init, w)
     }
 }
 
