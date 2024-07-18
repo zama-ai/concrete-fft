@@ -141,14 +141,14 @@ pub fn bench_ffts(c: &mut Criterion) {
             concrete_fft::unordered::Method::Measure(bench_duration),
         );
 
-        let (mut dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
-        let (mut src, mut stack) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
+        let (dst, stack) = stack.rb_mut().make_aligned_with::<c64, _>(n, 64, |_| z);
+        let (src, mut stack) = stack.make_aligned_with::<c64, _>(n, 64, |_| z);
 
         let bench_id = format!("rustfft-fwd-{n}");
         c.bench_function(&bench_id, |b| {
             let mut planner = FftPlannerAvx::<f64>::new().unwrap();
             let fwd_rustfft = planner.plan_fft_forward(n);
-            b.iter(|| fwd_rustfft.process_outofplace_with_scratch(&mut src, &mut dst, &mut scratch))
+            b.iter(|| fwd_rustfft.process_outofplace_with_scratch(src, dst, &mut scratch))
         });
         write_to_json(&bench_id, "rustfft-fwd", n);
 
@@ -156,7 +156,7 @@ pub fn bench_ffts(c: &mut Criterion) {
         c.bench_function(&bench_id, |b| {
             let fwd_fftw = PlanInterleavedC64::new(n, Sign::Forward);
             b.iter(|| {
-                fwd_fftw.execute(&mut src, &mut dst);
+                fwd_fftw.execute(src, dst);
             })
         });
         write_to_json(&bench_id, "fftw-fwd", n);
@@ -168,21 +168,19 @@ pub fn bench_ffts(c: &mut Criterion) {
             );
 
             let bench_id = format!("concrete-fwd-{n}");
-            c.bench_function(&bench_id, |b| {
-                b.iter(|| ordered.fwd(&mut dst, stack.rb_mut()))
-            });
+            c.bench_function(&bench_id, |b| b.iter(|| ordered.fwd(dst, stack.rb_mut())));
             write_to_json(&bench_id, "concrete-fwd", n);
         }
 
         let bench_id = format!("unordered-fwd-{n}");
         c.bench_function(&bench_id, |b| {
-            b.iter(|| unordered.fwd(&mut dst, stack.rb_mut()));
+            b.iter(|| unordered.fwd(dst, stack.rb_mut()));
         });
         write_to_json(&bench_id, "unordered-fwd", n);
 
         let bench_id = format!("unordered-inv-{n}");
         c.bench_function(&bench_id, |b| {
-            b.iter(|| unordered.inv(&mut dst, stack.rb_mut()));
+            b.iter(|| unordered.inv(dst, stack.rb_mut()));
         });
         write_to_json(&bench_id, "unordered-inv", n);
 
@@ -203,7 +201,7 @@ pub fn bench_ffts(c: &mut Criterion) {
                 if degree == n {
                     degree = 0;
                 }
-                unordered.fwd_monomial(degree, &mut dst);
+                unordered.fwd_monomial(degree, dst);
             })
         });
         write_to_json(&bench_id, "fwd-monomial", n);

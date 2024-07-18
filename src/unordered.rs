@@ -602,8 +602,8 @@ fn measure_fastest(
             let (w, stack) = stack
                 .rb_mut()
                 .make_aligned_with::<c64, _>(n + base_n, align, f);
-            let (mut scratch, stack) = stack.make_aligned_with::<c64, _>(base_n, align, f);
-            let (mut z, _) = stack.make_aligned_with::<c64, _>(n, align, f);
+            let (scratch, stack) = stack.make_aligned_with::<c64, _>(base_n, align, f);
+            let (z, _) = stack.make_aligned_with::<c64, _>(n, align, f);
 
             let n_runs = min_bench_duration_per_algo.as_secs_f64()
                 / (duration.as_secs_f64() * (n / base_n) as f64);
@@ -614,11 +614,11 @@ fn measure_fastest(
             let now = Instant::now();
             for _ in 0..n_runs {
                 fwd_depth(
-                    &mut z,
-                    &w,
+                    z,
+                    w,
                     base_fn,
                     base_n,
-                    &mut scratch,
+                    scratch,
                     fwd_process_x2,
                     fwd_process_x4,
                     fwd_process_x8,
@@ -824,13 +824,13 @@ impl Plan {
     /// ```
     pub fn fwd(&self, buf: &mut [c64], stack: PodStack) {
         assert_eq!(self.fft_size(), buf.len());
-        let (mut scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
+        let (scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
         fwd_depth(
             buf,
             &self.twiddles,
             self.base_fn_fwd,
             self.base_n,
-            &mut scratch,
+            scratch,
             self.fwd_process_x2,
             self.fwd_process_x4,
             self.fwd_process_x8,
@@ -925,13 +925,13 @@ impl Plan {
     /// ```
     pub fn inv(&self, buf: &mut [c64], stack: PodStack) {
         assert_eq!(self.fft_size(), buf.len());
-        let (mut scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
+        let (scratch, _) = stack.make_aligned_raw::<c64>(self.algo().1, CACHELINE_ALIGN);
         inv_depth(
             buf,
             &self.twiddles_inv,
             self.base_fn_inv,
             self.base_n,
-            &mut scratch,
+            scratch,
             self.inv_process_x2,
             self.inv_process_x4,
             self.inv_process_x8,

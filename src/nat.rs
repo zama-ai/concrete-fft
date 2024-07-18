@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+// TODO: remove this allow, clippy has a false positive on this for Plus2, Plus3 and Plus4
+
 pub struct Successor<N>(pub N);
 pub struct Zero;
 pub type N0 = Zero;
