@@ -44,6 +44,17 @@ public:
         concrete_fft::fwd(res_slice, scratch_slice);
     }
 
+    void execute_reverse_uint(double *res, const uint32_t *a)
+    {
+        for (int i = 0; i < Ns2; i++) {
+            auto tmp = twist[i] * std::complex((double)a[i], (double)a[Ns2 + i]);
+            res[2*i] = tmp.real();
+            res[2*i+1] = tmp.imag();
+        }
+        rust::Slice<double> res_slice(res, N);
+        concrete_fft::fwd(res_slice, scratch_slice);
+    }
+
     void execute_reverse_torus32(double *res, const uint32_t *a)
     {
         execute_reverse_int(res, (int32_t *)a);
@@ -73,8 +84,8 @@ public:
         for (int i = 0; i < Ns2; i++) {
             auto res_tmp =
                 std::complex<double>(buf[2*i], buf[2*i+1]) * std::conj(twist[i]) * _2sN;
-            res[i] = CAST_DOUBLE_TO_UINT32(res_tmp.real() / (Δ / 4));
-            res[i + Ns2] = CAST_DOUBLE_TO_UINT32(res_tmp.imag() / (Δ / 4));
+            res[i] = CAST_DOUBLE_TO_UINT32(res_tmp.real() / Δ);
+            res[i + Ns2] = CAST_DOUBLE_TO_UINT32(res_tmp.imag() / Δ);
         }
     }
 
@@ -131,7 +142,7 @@ public:
             tmp[i] = res_tmp.real();
             tmp[i + Ns2] = res_tmp.imag();
         }
-        for (int i=0; i<N; i++) res[i] = uint64_t(std::round(tmp[i]/(Δ/4)));
+        for (int i=0; i<N; i++) res[i] = uint64_t(std::round(tmp[i]/Δ));
     }
 
     // ~FFT_Processor_Concrete();
