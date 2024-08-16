@@ -295,21 +295,21 @@ fn fwd(data: &mut [f64], scratch_memory: &mut [u8]) {
     if data.len() == 512 {
         PLAN_512.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.fwd(buffer, stack);
         });
     }
     else if data.len() == 1024 {
         PLAN_1024.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.fwd(buffer, stack);
         });
     }
     else if data.len() == 2048 {
         PLAN_2048.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.fwd(buffer, stack);
         });
     }
@@ -328,21 +328,21 @@ fn inv(data: &mut [f64], scratch_memory: &mut [u8]) {
     if data.len() == 512 {
         PLAN_512.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.inv(buffer, stack);
         });
     }
     else if data.len() == 1024 {
         PLAN_1024.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.inv(buffer, stack);
         });
     }
     else if data.len() == 2048 {
         PLAN_2048.with(|plan|{
             // let mut scratch_memory = GlobalPodBuffer::new(plan.fft_scratch().unwrap());
-            let mut stack = PodStack::new(scratch_memory);
+            let stack = PodStack::new(scratch_memory);
             plan.inv(buffer, stack);
         });
     }
