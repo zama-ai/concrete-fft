@@ -7,6 +7,10 @@ else ()
     set(RUST_FLAGS "-C" "target-cpu=native")
 endif ()
 
+if(USE_AVX512)
+	set(RUST_FLAG  "${CARGO_CMD} --features=nightly")
+endif()
+
 if(ENABLE_LTO)
     set(RUST_FLAGS "${RUST_FLAGS} -Clinker-plugin-lto" "-Clinker=clang-17" "-Clink-arg=-fuse-ld=lld-17")
 endif()
