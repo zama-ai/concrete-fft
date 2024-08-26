@@ -4,6 +4,8 @@ CARGO_RS_CHECK_TOOLCHAIN:=+$(RS_CHECK_TOOLCHAIN)
 RS_BUILD_TOOLCHAIN:=stable
 CARGO_RS_BUILD_TOOLCHAIN:=+$(RS_BUILD_TOOLCHAIN)
 MIN_RUST_VERSION:=1.65
+WASM_BINDGEN_VERSION:=$(shell grep '^wasm-bindgen[[:space:]]*=' Cargo.toml | cut -d '=' -f 2 | xargs)
+NODE_VERSION=22.6
 AVX512_SUPPORT?=OFF
 FFT128_SUPPORT?=OFF
 # This is done to avoid forgetting it, we still precise the RUSTFLAGS in the commands to be able to
@@ -47,6 +49,35 @@ install_rs_build_toolchain:
 	( echo "Unable to install $(RS_BUILD_TOOLCHAIN) toolchain, check your rustup installation. \
 	Rustup can be downloaded at https://rustup.rs/" && exit 1 )
 
+.PHONY: install_build_wasm32_target # Install the wasm32 toolchain used for builds
+install_build_wasm32_target: install_rs_build_toolchain
+	rustup +$(RS_BUILD_TOOLCHAIN) target add wasm32-unknown-unknown || \
+	( echo "Unable to install wasm32-unknown-unknown target toolchain, check your rustup installation. \
+	Rustup can be downloaded at https://rustup.rs/" && exit 1 )
+
+# The installation uses the ^ symbol because we need the matching version of wasm-bindgen in the
+# Cargo.toml, as we don't lock those dependencies, this allows to get the matching CLI
+.PHONY: install_wasm_bindgen_cli # Install wasm-bindgen-cli to get access to the test runner
+install_wasm_bindgen_cli: install_rs_build_toolchain
+	cargo +$(RS_BUILD_TOOLCHAIN) install --locked wasm-bindgen-cli --version ^$(WASM_BINDGEN_VERSION)
+
+.PHONY: install_node # Install last version of NodeJS via nvm
+install_node:
+	curl -o nvm_install.sh https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
+	@echo "2ed5e94ba12434370f0358800deb69f514e8bce90f13beb0e1b241d42c6abafd nvm_install.sh" > nvm_checksum
+	@sha256sum -c nvm_checksum
+	@rm nvm_checksum
+	$(SHELL) nvm_install.sh
+	@rm nvm_install.sh
+	source ~/.bashrc
+	$(SHELL) -i -c 'nvm install $(NODE_VERSION)' || \
+	( echo "Unable to install node, unknown error." && exit 1 )
+
+.PHONY: check_nvm_installed # Check if Node Version Manager is installed
+check_nvm_installed:
+	@source ~/.nvm/nvm.sh && nvm --version > /dev/null 2>&1 || \
+	( echo "Unable to locate Node. Run 'make install_node'" && exit 1 )
+
 .PHONY: fmt # Format rust code
 fmt: install_rs_check_toolchain
 	cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" fmt
@@ -85,7 +116,7 @@ test: install_rs_build_toolchain
 
 .PHONY: test_serde
 test_serde: install_rs_build_toolchain
-	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release
+	RUSTFLAGS="$(RUSTFLAGS)" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
 		--features=serde
 
 .PHONY: test_nightly
@@ -105,8 +136,16 @@ test_no_std_nightly: install_rs_check_toolchain
 		--no-default-features \
 		--features=nightly,$(FFT128_FEATURE)
 
+.PHONY: test_node_js
+test_node_js: install_rs_build_toolchain install_build_wasm32_target install_wasm_bindgen_cli check_nvm_installed
+	source ~/.nvm/nvm.sh && \
+	nvm install $(NODE_VERSION) && \
+	nvm use $(NODE_VERSION) && \
+	RUSTFLAGS="" cargo $(CARGO_RS_BUILD_TOOLCHAIN) test --release \
+		--features=serde --target wasm32-unknown-unknown
+
 .PHONY: test_all
-test_all: test test_serde test_nightly test_no_std test_no_std_nightly
+test_all: test test_serde test_nightly test_no_std test_no_std_nightly test_node_js
 
 .PHONY: doc # Build rust doc
 doc: install_rs_check_toolchain

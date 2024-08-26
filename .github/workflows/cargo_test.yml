@@ -66,3 +66,13 @@ jobs:
         run: |
           make test_no_std_nightly
           make test_no_std_nightly FFT128_SUPPORT=ON
+
+  cargo-tests-node-js:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+
+      - name: Test node js
+        run: |
+          make install_node
+          make test_node_js

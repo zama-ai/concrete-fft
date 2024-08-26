@@ -71,7 +71,8 @@ fn measure_n_runs(
     let (scratch, _) = stack.make_aligned_raw::<c64>(n, CACHELINE_ALIGN);
     let [fwd, _] = get_fn_ptr(algo, n);
 
-    use std::time::Instant;
+    // For wasm we have a dedicated implementation going through js-sys
+    use crate::time::Instant;
     let now = Instant::now();
 
     for _ in 0..n_runs {
@@ -101,7 +102,13 @@ pub(crate) fn measure_fastest(
     stack: PodStack,
 ) -> (FftAlgo, Duration) {
     const N_ALGOS: usize = 8;
-    const MIN_DURATION: Duration = Duration::from_millis(1);
+    const MIN_DURATION: Duration = if cfg!(target_arch = "wasm32") {
+        // This is to account for the fact the js-sys based time measurement has a resolution of 1ms
+        // on chrome, this will slow down the fft benchmarking somewhat, but it's barely noticeable
+        Duration::from_millis(10)
+    } else {
+        Duration::from_millis(1)
+    };
 
     assert!(n.is_power_of_two());
 
@@ -443,6 +450,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_fft() {
         test_fft_simd(crate::fft_simd::Scalar);
