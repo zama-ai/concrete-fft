@@ -610,7 +610,8 @@ fn measure_fastest(
 
             let n_runs = n_runs.ceil() as u32;
 
-            use std::time::Instant;
+            // For wasm we have a dedicated implementation going through js-sys
+            use crate::time::Instant;
             let now = Instant::now();
             for _ in 0..n_runs {
                 fwd_depth(
@@ -1067,6 +1068,7 @@ mod tests {
 
     extern crate alloc;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_fwd() {
         for n in [128, 256, 512, 1024] {
@@ -1101,6 +1103,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_fwd_monomial() {
         for n in [256, 512, 1024] {
@@ -1133,6 +1136,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_roundtrip() {
         for n in [32, 64, 256, 512, 1024] {
@@ -1167,6 +1171,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_equivalency() {
         use num_complex::Complex;
@@ -9401,6 +9406,7 @@ mod tests_serde {
 
     extern crate alloc;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_serde() {
         for n in [64, 128, 256, 512, 1024] {
