@@ -1,6 +1,6 @@
 [package]
 name = "concrete-fft"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 authors = ["sarah el kazdadi <sarah.elkazdadi@zama.ai>"]
 description = "Concrete-FFT is a pure Rust high performance fast Fourier transform library."
