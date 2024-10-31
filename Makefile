@@ -78,6 +78,11 @@ check_nvm_installed:
 	@source ~/.nvm/nvm.sh && nvm --version > /dev/null 2>&1 || \
 	( echo "Unable to locate Node. Run 'make install_node'" && exit 1 )
 
+.PHONY: check_actionlint_installed # Check if actionlint workflow linter is installed
+check_actionlint_installed:
+	@actionlint --version > /dev/null 2>&1 || \
+	( echo "Unable to locate actionlint. Try installing it: https://github.com/rhysd/actionlint/releases" && exit 1 )
+
 .PHONY: fmt # Format rust code
 fmt: install_rs_check_toolchain
 	cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" fmt
@@ -85,6 +90,10 @@ fmt: install_rs_check_toolchain
 .PHONY: check_fmt # Check rust code format
 check_fmt: install_rs_check_toolchain
 	cargo "$(CARGO_RS_CHECK_TOOLCHAIN)" fmt --check
+
+.PHONY: lint_workflow # Run static linter on GitHub workflows
+lint_workflow: check_actionlint_installed
+	@actionlint
 
 .PHONY: clippy # Run clippy lints
 clippy: install_rs_check_toolchain
