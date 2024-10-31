@@ -73,7 +73,7 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          make bench
+          make FFT128_SUPPORT=ON bench
 
       - name: Parse results
         run: |
@@ -91,36 +91,12 @@ jobs:
 
       - name: Run benchmarks with AVX512
         run: |
-          make AVX512_SUPPORT=ON bench
+          make FFT128_SUPPORT=ON AVX512_SUPPORT=ON bench
 
       - name: Parse AVX512 results
         run: |
           python3 ./ci/benchmark_parser.py target/criterion ${{ env.RESULTS_FILENAME }} \
           --name-suffix avx512 \
-          --append-results
-
-          rm -rf target/criterion benchmarks_parameters/
-
-      - name: Run benchmarks with FFT128
-        run: |
-          make FFT128_SUPPORT=ON bench
-
-      - name: Parse FFT128 results
-        run: |
-          python3 ./ci/benchmark_parser.py target/criterion ${{ env.RESULTS_FILENAME }} \
-          --name-suffix fft128 \
-          --append-results
-
-          rm -rf target/criterion benchmarks_parameters/
-
-      - name: Run benchmarks with FFT128 + AVX512
-        run: |
-          make AVX512_SUPPORT=ON FFT128_SUPPORT=ON bench
-
-      - name: Parse FFT128 + AVX512 results
-        run: |
-          python3 ./ci/benchmark_parser.py target/criterion ${{ env.RESULTS_FILENAME }} \
-          --name-suffix fft128_avx512 \
           --append-results
 
       - name: Upload parsed results artifact
